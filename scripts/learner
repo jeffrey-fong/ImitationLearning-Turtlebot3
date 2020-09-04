@@ -36,6 +36,9 @@ CLEARDATA = 4
 
 currmode = None
 
+# constant for trajectory saving file name
+num_traj = 0
+
 # Topic Callbacks
 def cmdCallback(vel):
 	global command
@@ -63,14 +66,13 @@ def handleModeChange(m):
 	global currmode
 	global pos
 	global laser
-	global command 
+	global command
 
 	reqmode = int(m.reqmode)
 	if reqmode == COLLECT:
 		rospy.loginfo(rospy.get_caller_id() + ": COLLECT MODE")
 	elif reqmode == TRAIN:
 		rospy.loginfo(rospy.get_caller_id() + ": TRAIN MODE")
-		print("Printing D: ", D)
 	elif reqmode == EXECUTE:
 		rospy.loginfo(rospy.get_caller_id() + ": EXECUTE MODE")
 	elif reqmode == CLEARDATA:
@@ -84,17 +86,32 @@ def handleModeChange(m):
 	currmode = reqmode
 	return ModeResponse(currmode)
 
+def recordData2File(D):
+	"""
+	dump the latest trajectory data into a json file
+
+	Args:
+		D {dict} -- the current trajectory data.
+	"""
+	global num_traj
+
+	file_name = "./data/trajectory_" + str(num_traj)
+
+	with open(file_name, 'w') as fout:
+		json.dump(D, fout)
+	num_traj += 1
+
 
 def collect(D, cmdpub):
 	# data collection code 
 	if (command is not None) and (pos is not None): 
-		X = [pos.pose.pose.position.x, pos.pose.pose.position.y, pos.pose.pose.position.z, 
+		robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y, pos.pose.pose.position.z, 
 					 pos.pose.pose.orientation.x, pos.pose.pose.orientation.y, 
 					 pos.pose.pose.orientation.z, pos.pose.pose.orientation.w ] 
-		Y = [command.linear.x, command.angular.z]
-		D["X"] += [ X ]
-		D["Y"] += [ Y ]
-		print("Stored", X, Y)
+		robot_vel = [command.linear.x, command.angular.z]
+		D["robot_pos"] += [ robot_pos ]
+		D["robot_vel"] += [ robot_vel ]
+		print("Stored", robot_pos, robot_vel)
 	else:
 		print(command)
 		print(pos)
@@ -165,7 +182,7 @@ def learner():
 	rate = rospy.Rate(10) #Hz
 
 	# dataset
-	D = {'X': [], 'Y':[]}
+	D = {'robot_pos': [], 'robot_vel':[]}
 
 	# init policy
 	policy = None
@@ -176,7 +193,6 @@ def learner():
 			# code comes here
 			D = collect(D, cmdpub)
 			print("collect")
-
 		elif currmode == TRAIN:
 			# code comes here
 			policy = train(D)
@@ -191,6 +207,10 @@ def learner():
 				cmdpub.publish(command)
 
 			print("IDLE")
+			# write data to json file and reset D
+			if len(D['robot_pos']) > 0:
+				recordData2File(D)
+			D = {'robot_pos': [], 'robot_vel':[]}
 
 		# any extra things to do per loop comes here 
 
