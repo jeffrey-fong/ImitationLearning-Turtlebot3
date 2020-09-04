@@ -88,7 +88,8 @@ def handleModeChange(m):
 
 def recordData2File(D):
 	"""
-	dump the latest trajectory data into a json file
+	Process the latest trajectory data by removing all points that the turtlebot is not
+	moving and dump the trajectory into a json file.
 
 	Args:
 		D {dict} -- the current trajectory data.
@@ -97,9 +98,19 @@ def recordData2File(D):
 
 	file_name = "./data/trajectory_" + str(num_traj)
 
-	with open(file_name, 'w') as fout:
-		json.dump(D, fout)
-	num_traj += 1
+	# Process trajectory data. Remove all datapoints that are zero velocities
+	i = 0
+	while i < len(D["robot_vel"]):
+		if D["robot_vel"][i] == [0.0, 0.0]:
+			D["robot_pos"].pop(i)
+			D["robot_vel"].pop(i)
+		else:
+			i += 1
+
+	if len(D["robot_vel"]) > 0:
+		with open(file_name, 'w') as fout:
+			json.dump(D, fout)
+		num_traj += 1
 
 
 def collect(D, cmdpub):
@@ -210,7 +221,7 @@ def learner():
 			# write data to json file and reset D
 			if len(D['robot_pos']) > 0:
 				recordData2File(D)
-			D = {'robot_pos': [], 'robot_vel':[]}
+			D = clearDataset(D)
 
 		# any extra things to do per loop comes here 
 
