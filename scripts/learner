@@ -50,7 +50,7 @@ def cmdCallback(vel):
 
 def laserCallback(scan):
 	global laser
-	#rospy.loginfo(rospy.get_caller_id() + "scan %s", scan.ranges)
+	rospy.loginfo(rospy.get_caller_id() + "scan %s", scan.ranges)
 	laser = scan 
 	# your code comes here
 
@@ -103,6 +103,7 @@ def recordData2File(D):
 	while i < len(D["robot_vel"]):
 		if D["robot_vel"][i] == [0.0, 0.0]:
 			D["robot_pos"].pop(i)
+			D["laser_scan"].pop(i)
 			D["robot_vel"].pop(i)
 		else:
 			i += 1
@@ -116,11 +117,13 @@ def recordData2File(D):
 def collect(D, cmdpub):
 	# data collection code 
 	if (command is not None) and (pos is not None): 
-		robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y, pos.pose.pose.position.z, 
-					 pos.pose.pose.orientation.x, pos.pose.pose.orientation.y, 
-					 pos.pose.pose.orientation.z, pos.pose.pose.orientation.w ] 
+		robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y, 
+						pos.pose.pose.position.z, 
+					 	pos.pose.pose.orientation.x, pos.pose.pose.orientation.y, 
+					 	pos.pose.pose.orientation.z, pos.pose.pose.orientation.w ] 
 		robot_vel = [command.linear.x, command.angular.z]
 		D["robot_pos"] += [ robot_pos ]
+		D["laser_scan"] += [ laser.ranges ]
 		D["robot_vel"] += [ robot_vel ]
 		print("Stored", robot_pos, robot_vel)
 	else:
@@ -136,7 +139,8 @@ def train(D):
 	# training code
 	policy = None
 	try:
-		policy = MultiOutputRegressor(Ridge(random_state=123)).fit(D['X'], D['Y'])
+		policy = MultiOutputRegressor(Ridge(random_state=123)).fit(D['robot_pos'], 
+																	D['robot_vel'])
 	except:
 		print("Exception during training")
 
@@ -171,7 +175,7 @@ def execute(policy, cmdpub):
 	return 
 
 def clearDataset(D):
-	D = {'X': [], 'Y':[]}
+	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
 	return D
 
 
@@ -193,7 +197,7 @@ def learner():
 	rate = rospy.Rate(10) #Hz
 
 	# dataset
-	D = {'robot_pos': [], 'robot_vel':[]}
+	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
 
 	# init policy
 	policy = None
