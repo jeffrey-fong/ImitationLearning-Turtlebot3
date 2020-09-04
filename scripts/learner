@@ -1,0 +1,204 @@
+#!/usr/bin/env python
+
+# CS6244 Starter Learner 
+# This is a very simple learner just to get you started. It is not a good submission.
+# It implements some of the specifications listed and uses a simple ridge regressor 
+# with odometry as input (you don't really have ground truth odometry in real-life)
+# You are completely free to change the structure; I wrote this quickly so, it is
+# very unlikely to be the best structure or be bug free. :P
+
+
+import rospy
+from geometry_msgs.msg import Twist, Pose 
+from sensor_msgs.msg import LaserScan
+from nav_msgs.msg import Odometry
+from cs6244.srv import Mode, ModeResponse
+
+
+import numpy as np
+from sklearn.datasets import load_linnerud
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import Ridge
+import json
+
+
+# global data msgs
+command = None 
+laser = None 
+pos = None 
+
+# constants for the mode
+IDLE = 0
+COLLECT = 1
+TRAIN = 2
+EXECUTE = 3
+CLEARDATA = 4
+
+currmode = None
+
+# Topic Callbacks
+def cmdCallback(vel):
+	global command
+	#rospy.loginfo(rospy.get_caller_id() + "command %s %s", vel.linear, vel.angular)
+	command = vel 
+
+	# your code comes here
+
+
+def laserCallback(scan):
+	global laser
+	#rospy.loginfo(rospy.get_caller_id() + "scan %s", scan.ranges)
+	laser = scan 
+	# your code comes here
+
+
+def odomCallback(odom):
+	global pos
+	#rospy.loginfo(rospy.get_caller_id() + "odom %s", odom.pose)
+	pos = odom 
+	# your code comes here
+
+
+def handleModeChange(m):
+	global currmode
+	global pos
+	global laser
+	global command 
+
+	reqmode = int(m.reqmode)
+	if reqmode == COLLECT:
+		rospy.loginfo(rospy.get_caller_id() + ": COLLECT MODE")
+	elif reqmode == TRAIN:
+		rospy.loginfo(rospy.get_caller_id() + ": TRAIN MODE")
+		print("Printing D: ", D)
+	elif reqmode == EXECUTE:
+		rospy.loginfo(rospy.get_caller_id() + ": EXECUTE MODE")
+	elif reqmode == CLEARDATA:
+		rospy.loginfo(rospy.get_caller_id() + ": CLEARDATA MODE")
+	elif reqmode == IDLE:
+		pos = laser = command = None 
+		rospy.loginfo(rospy.get_caller_id() + ": IDLE MODE")
+	else:
+		reqmode = currmode 
+		
+	currmode = reqmode
+	return ModeResponse(currmode)
+
+
+def collect(D, cmdpub):
+	# data collection code 
+	if (command is not None) and (pos is not None): 
+		X = [pos.pose.pose.position.x, pos.pose.pose.position.y, pos.pose.pose.position.z, 
+					 pos.pose.pose.orientation.x, pos.pose.pose.orientation.y, 
+					 pos.pose.pose.orientation.z, pos.pose.pose.orientation.w ] 
+		Y = [command.linear.x, command.angular.z]
+		D["X"] += [ X ]
+		D["Y"] += [ Y ]
+		print("Stored", X, Y)
+	else:
+		print(command)
+		print(pos)
+
+	cmdpub.publish(command)
+	return D
+
+
+def train(D):
+	global currmode 
+	# training code
+	policy = None
+	try:
+		policy = MultiOutputRegressor(Ridge(random_state=123)).fit(D['X'], D['Y'])
+	except:
+		print("Exception during training")
+
+	#done training, return to idle
+	currmode=IDLE 
+	return policy 
+
+def execute(policy, cmdpub):
+	# execute policy
+	if (policy is None) or (cmdpub is None):
+		return 
+	X = [[pos.pose.pose.position.x, pos.pose.pose.position.y, pos.pose.pose.position.z, 
+				 pos.pose.pose.orientation.x, pos.pose.pose.orientation.y, 
+				 pos.pose.pose.orientation.z, pos.pose.pose.orientation.w ] ]
+
+	y = policy.predict(X)
+
+	# print
+	print("Prediction: ", y)
+
+	#publish msg
+	twist = Twist()
+	twist.linear.x = y[0][0]
+	twist.linear.y = 0.0
+	twist.linear.z = 0.0
+	twist.angular.x = 0.0
+	twist.angular.y = 0.0
+	twist.angular.z = y[0][1]
+	cmdpub.publish(twist)
+
+
+	return 
+
+def clearDataset(D):
+	D = {'X': [], 'Y':[]}
+	return D
+
+
+def learner():
+
+	rospy.init_node('learner', anonymous=True)
+	
+	# add callbacks
+	rospy.Subscriber("cmd_vel_human", Twist, cmdCallback)
+	rospy.Subscriber("scan", LaserScan, laserCallback)
+	rospy.Subscriber("odom", Odometry, odomCallback)
+
+	# publisher
+	cmdpub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
+
+	# service handler
+	modeservice = rospy.Service('mode_change', Mode, handleModeChange)
+	
+	rate = rospy.Rate(10) #Hz
+
+	# dataset
+	D = {'X': [], 'Y':[]}
+
+	# init policy
+	policy = None
+
+	# main loop
+	while not rospy.is_shutdown():
+		if currmode == COLLECT:
+			# code comes here
+			D = collect(D, cmdpub)
+			print("collect")
+
+		elif currmode == TRAIN:
+			# code comes here
+			policy = train(D)
+			print("train")
+		elif currmode == EXECUTE:
+			# code comes here
+			execute(policy, cmdpub)
+			print("execute")
+		else:
+			#pass through
+			if command is not None:
+				cmdpub.publish(command)
+
+			print("IDLE")
+
+		# any extra things to do per loop comes here 
+
+
+		# sleep until we need
+		rate.sleep()
+
+
+
+if __name__=='__main__':
+	learner()
