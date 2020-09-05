@@ -10,7 +10,7 @@
 
 import rospy
 from geometry_msgs.msg import Twist, Pose 
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, Image
 from nav_msgs.msg import Odometry
 from cs6244.srv import Mode, ModeResponse
 
@@ -26,6 +26,7 @@ import json
 command = None 
 laser = None 
 pos = None 
+image = None
 
 # constants for the mode
 IDLE = 0
@@ -50,7 +51,7 @@ def cmdCallback(vel):
 
 def laserCallback(scan):
 	global laser
-	rospy.loginfo(rospy.get_caller_id() + "scan %s", scan.ranges)
+	#rospy.loginfo(rospy.get_caller_id() + "scan %s", scan.ranges)
 	laser = scan 
 	# your code comes here
 
@@ -61,11 +62,18 @@ def odomCallback(odom):
 	pos = odom 
 	# your code comes here
 
+def cameraCallback(camera):
+	global image
+	#rospy.loginfo(rospy.get_caller_id() + "image %s", camera.encoding)
+	image = camera
+	# Do somemore preprocessing here, if any
+
 
 def handleModeChange(m):
 	global currmode
 	global pos
 	global laser
+	global image
 	global command
 
 	reqmode = int(m.reqmode)
@@ -78,7 +86,7 @@ def handleModeChange(m):
 	elif reqmode == CLEARDATA:
 		rospy.loginfo(rospy.get_caller_id() + ": CLEARDATA MODE")
 	elif reqmode == IDLE:
-		pos = laser = command = None 
+		pos = laser = image = command = None 
 		rospy.loginfo(rospy.get_caller_id() + ": IDLE MODE")
 	else:
 		reqmode = currmode 
@@ -187,6 +195,7 @@ def learner():
 	rospy.Subscriber("cmd_vel_human", Twist, cmdCallback)
 	rospy.Subscriber("scan", LaserScan, laserCallback)
 	rospy.Subscriber("odom", Odometry, odomCallback)
+	rospy.Subscriber("/camera/rgb/image_raw", Image, cameraCallback)
 
 	# publisher
 	cmdpub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
