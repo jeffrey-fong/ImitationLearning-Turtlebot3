@@ -21,6 +21,9 @@ from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Ridge
 import json
 
+from model_il import ImitationNet
+import model_il
+
 
 # global data msgs
 command = None 
@@ -61,6 +64,7 @@ def odomCallback(odom):
 	#rospy.loginfo(rospy.get_caller_id() + "odom %s", odom.pose)
 	pos = odom 
 	# your code comes here
+
 
 def cameraCallback(camera):
 	global image
@@ -104,7 +108,7 @@ def recordData2File(D):
 	"""
 	global num_traj
 
-	file_name = "./data/trajectory_" + str(num_traj)
+	file_name = "./data/trajectory_" + str(num_traj) + '.json'
 
 	# Process trajectory data. Remove all datapoints that are zero velocities
 	i = 0
@@ -142,15 +146,19 @@ def collect(D, cmdpub):
 	return D
 
 
-def train(D):
+def train(model, dataset):
 	global currmode 
 	# training code
 	policy = None
-	try:
+	'''try:
 		policy = MultiOutputRegressor(Ridge(random_state=123)).fit(D['robot_pos'], 
 																	D['robot_vel'])
 	except:
-		print("Exception during training")
+		print("Exception during training")'''
+
+	# train neural network
+	model_il.train(model)
+	model.eval()
 
 	#done training, return to idle
 	currmode=IDLE 
@@ -208,6 +216,9 @@ def learner():
 	# dataset
 	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
 
+	# Initialize model (For now, its just odom as input)
+	model = ImitationNet(control_dim=2, device='cpu')
+
 	# init policy
 	policy = None
 
@@ -216,21 +227,17 @@ def learner():
 		if currmode == COLLECT:
 			# code comes here
 			D = collect(D, cmdpub)
-			print("collect")
 		elif currmode == TRAIN:
 			# code comes here
-			policy = train(D)
-			print("train")
+			policy = train(model, D)
 		elif currmode == EXECUTE:
 			# code comes here
 			execute(policy, cmdpub)
-			print("execute")
 		else:
 			#pass through
 			if command is not None:
 				cmdpub.publish(command)
 
-			print("IDLE")
 			# write data to json file and reset D
 			if len(D['robot_pos']) > 0:
 				recordData2File(D)
