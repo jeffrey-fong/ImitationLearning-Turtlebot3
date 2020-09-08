@@ -17,15 +17,15 @@ class ImitationDataset(Dataset):
     def __init__(self, device='cpu', is_test=False):
         super(ImitationDataset, self).__init__()
 
-        #self.image_list = None
-        #self.action_list = None
+        # Initializing attributes
         self.poses = None
         self.scans = None
         self.velocities = None
-
         self.device = device
 
         file_path = "/home/jeffrey/catkin_ws/src/cs6244/data/"
+
+        # Iterate through all data files
         i = 0
         while True:
             # check if any data files exists

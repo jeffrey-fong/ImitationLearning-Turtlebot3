@@ -17,6 +17,5 @@ class PoseToControl(nn.Module):
             nn.ReLU())
 
     def forward(self, odom_input, batch_size):
-        ctrl = self.in_to_control(odom_input)
-        #h = h.view(size=(h.size(0), -1))
-        return ctrl
+        control = self.in_to_control(odom_input)
+        return control
