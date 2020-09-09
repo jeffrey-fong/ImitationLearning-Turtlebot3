@@ -160,6 +160,8 @@ def train(model, dataset):
 	model_il.train(model)
 	model.eval()
 
+	print("Training round complete")
+
 	#done training, return to idle
 	currmode=IDLE 
 	return policy 
