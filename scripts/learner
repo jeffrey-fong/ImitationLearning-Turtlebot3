@@ -79,9 +79,9 @@ def expertCallback(msg):
 	global currmode
 	print('Expert reached the goal. Resetting robot position')
 	# Reset robot pose in gazebo and rviz
-	#os.system('rosrun cs6244 reset_robot_pos')
-	print('Changing mode back to idle.')
+	rospy.sleep(1.0)
 	pub.publish(True)
+	print('Changing mode back to idle.')
 	currmode = IDLE
 
 
@@ -213,18 +213,12 @@ def clearDataset(D):
 
 
 def learner():
-
-	rospy.init_node('learner', anonymous=True)
-	
 	# add callbacks
 	rospy.Subscriber("cmd_vel", Twist, cmdCallback)
 	rospy.Subscriber("scan", LaserScan, laserCallback)
 	rospy.Subscriber("odom", Odometry, odomCallback)
 	rospy.Subscriber("/camera/rgb/image_raw", Image, cameraCallback)
 	rospy.Subscriber("learner_feedback", Bool, expertCallback)
-
-	# add ROS publishers
-	pub = rospy.Publisher("reset_robot_pos", Bool, queue_size=10)
 
 	# service handler
 	modeservice = rospy.Service('mode_change', Mode, handleModeChange)
@@ -271,4 +265,7 @@ def learner():
 
 
 if __name__=='__main__':
+	rospy.init_node('learner', anonymous=True)
+	# add ROS publishers
+	pub = rospy.Publisher("reset_robot_pos", Bool, queue_size=10)
 	learner()

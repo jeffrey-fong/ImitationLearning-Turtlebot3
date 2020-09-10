@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
-# This script contains a service that listens to learner/daglearner script 
-# and executes the expert policy upon receiving the signal from the 
-# learner/daglearner script. The expert policy executes the entire trajectory
-# if called by learner, while just one step if called by daglearner.
+# This script listens to learner/daglearner script and executes the expert 
+# policy upon receiving the signal from the learner/daglearner script. 
+# The expert policy executes the entire trajectory if called by learner, 
+# while just one step if called by daglearner.
 
 import rospy
 import actionlib
@@ -34,8 +34,6 @@ class Expert:
 		self.pub_mode = rospy.Publisher("learner_feedback", Bool, queue_size=10)
 		self.sub_mode = rospy.Subscriber(
 									"learner_mode", String, self.learnerModeCallback)
-		self.sub_stop = rospy.Subscriber("stop", Bool, self.stopCmdCallback)
-		print('done')
 
 	def learnerModeCallback(self, msg):
 		# Check whether dagger or supervised
@@ -52,16 +50,6 @@ class Expert:
 		else:
 			print('Wrong input. Feedback to learner')
 			self.pub_mode.publish(False)
-
-	def stopCmdCallback(self, msg):
-		stop_cmd = MoveBaseGoal()
-		stop_cmd.target_pose.header.frame_id = "map"
-		stop_cmd.target_pose.header.stamp = rospy.Time.now()
-		stop_cmd.target_pose.pose.position.x = -6.503
-		stop_cmd.target_pose.pose.position.y = -2.422
-		stop_cmd.target_pose.pose.orientation.z = -0.77
-		stop_cmd.target_pose.pose.orientation.w = -0.63
-		self.client.send_goal(stop_cmd)
 
 	def moveToGoal(self):
 		# Send goal (cancel thereafter if dagger)

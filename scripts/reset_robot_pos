@@ -40,9 +40,6 @@ def resetRobotPositionCallback(msg):
 		print("Service call failed: %s" % e)
 
 	# Reset in rviz
-	br.sendTransform((0, 0, 0),
-                     tf.transformations.quaternion_from_euler(0, 0, 0),
-                     rospy.Time.now(), "odom", "map")
 	resetrviz = PoseWithCovarianceStamped()
 	resetrviz.header.frame_id = "map"
 	resetrviz.header.stamp = rospy.Time.now()
@@ -51,6 +48,9 @@ def resetRobotPositionCallback(msg):
 	resetrviz.pose.pose.orientation.z = -0.77
 	resetrviz.pose.pose.orientation.w = -0.63
 	pub_resetrviz.publish(resetrviz)
+	br.sendTransform((0, 0, 0),
+					tf.transformations.quaternion_from_euler(0, 0, 0),
+					rospy.Time.now(), "odom", "map")
 	print('reset done')
 
 
