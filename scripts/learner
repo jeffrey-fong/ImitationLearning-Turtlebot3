@@ -12,6 +12,7 @@ import rospy
 from geometry_msgs.msg import Twist, Pose 
 from sensor_msgs.msg import LaserScan, Image
 from nav_msgs.msg import Odometry
+from std_msgs.msg import String, Bool
 from cs6244.srv import Mode, ModeResponse
 
 
@@ -20,6 +21,8 @@ from sklearn.datasets import load_linnerud
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.linear_model import Ridge
 import json
+
+import os
 
 from model_il import ImitationNet
 import model_il
@@ -72,6 +75,15 @@ def cameraCallback(camera):
 	image = camera
 	# Do somemore preprocessing here, if any
 
+def expertCallback(msg):
+	global currmode
+	print('Expert reached the goal. Resetting robot position')
+	# Reset robot pose in gazebo and rviz
+	#os.system('rosrun cs6244 reset_robot_pos')
+	print('Changing mode back to idle.')
+	pub.publish(True)
+	currmode = IDLE
+
 
 def handleModeChange(m):
 	global currmode
@@ -80,9 +92,13 @@ def handleModeChange(m):
 	global image
 	global command
 
+	pub_expert = rospy.Publisher('learner_mode', String, queue_size=10)
+	rospy.sleep(0.1)
+
 	reqmode = int(m.reqmode)
 	if reqmode == COLLECT:
 		rospy.loginfo(rospy.get_caller_id() + ": COLLECT MODE")
+		pub_expert.publish("dagger")#("supervised")
 	elif reqmode == TRAIN:
 		rospy.loginfo(rospy.get_caller_id() + ": TRAIN MODE")
 	elif reqmode == EXECUTE:
@@ -126,7 +142,7 @@ def recordData2File(D):
 		num_traj += 1
 
 
-def collect(D, cmdpub):
+def collect(D):
 	# data collection code 
 	if (command is not None) and (pos is not None): 
 		robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y, 
@@ -142,7 +158,6 @@ def collect(D, cmdpub):
 		print(command)
 		print(pos)
 
-	cmdpub.publish(command)
 	return D
 
 
@@ -166,9 +181,9 @@ def train(model, dataset):
 	currmode=IDLE 
 	return policy 
 
-def execute(policy, cmdpub):
+def execute(policy):
 	# execute policy
-	if (policy is None) or (cmdpub is None):
+	'''if (policy is None) or (cmdpub is None):
 		return 
 	X = [[pos.pose.pose.position.x, pos.pose.pose.position.y, pos.pose.pose.position.z, 
 				 pos.pose.pose.orientation.x, pos.pose.pose.orientation.y, 
@@ -187,7 +202,7 @@ def execute(policy, cmdpub):
 	twist.angular.x = 0.0
 	twist.angular.y = 0.0
 	twist.angular.z = y[0][1]
-	cmdpub.publish(twist)
+	cmdpub.publish(twist)'''
 
 
 	return 
@@ -202,13 +217,14 @@ def learner():
 	rospy.init_node('learner', anonymous=True)
 	
 	# add callbacks
-	rospy.Subscriber("cmd_vel_human", Twist, cmdCallback)
+	rospy.Subscriber("cmd_vel", Twist, cmdCallback)
 	rospy.Subscriber("scan", LaserScan, laserCallback)
 	rospy.Subscriber("odom", Odometry, odomCallback)
 	rospy.Subscriber("/camera/rgb/image_raw", Image, cameraCallback)
+	rospy.Subscriber("learner_feedback", Bool, expertCallback)
 
-	# publisher
-	cmdpub = rospy.Publisher('cmd_vel', Twist, queue_size=10)
+	# add ROS publishers
+	pub = rospy.Publisher("reset_robot_pos", Bool, queue_size=10)
 
 	# service handler
 	modeservice = rospy.Service('mode_change', Mode, handleModeChange)
@@ -228,17 +244,18 @@ def learner():
 	while not rospy.is_shutdown():
 		if currmode == COLLECT:
 			# code comes here
-			D = collect(D, cmdpub)
+			D = collect(D)
 		elif currmode == TRAIN:
 			# code comes here
 			policy = train(model, D)
 		elif currmode == EXECUTE:
 			# code comes here
-			execute(policy, cmdpub)
+			execute(policy)
 		else:
 			#pass through
-			if command is not None:
-				cmdpub.publish(command)
+			pass
+			#if command is not None:
+			#	cmdpub.publish(command)
 
 			# write data to json file and reset D
 			if len(D['robot_pos']) > 0:
