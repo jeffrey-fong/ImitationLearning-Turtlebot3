@@ -164,9 +164,7 @@ def collect(D):
 
 
 def train(model, dataset):
-	global currmode 
-	# training code
-	policy = None
+	global currmode
 
 	# train neural network
 	model_il.train(model)
@@ -175,13 +173,22 @@ def train(model, dataset):
 	print("Training round complete. Returning to Idle mode.")
 
 	#done training, return to idle
-	currmode=IDLE 
-	return policy 
+	currmode=IDLE
 
-def execute(policy):
-	# execute policy
-	print('execute pose:', pos.pose.pose)
+def execute(model):
+	global currmode
 
+	vel_cmd = Twist()
+
+	while abs(pos.pose.pose.position.x - 6.0) > 0.01 and \
+			abs(pos.pose.pose.position.y + 1.0) > 0.01:
+		# execute policy
+		odom_input = np.array([[pos.pose.pose.position.x, pos.pose.pose.position.y,
+								pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]])
+		vel = model_il.test(model, odom_input)
+		vel_cmd.linear.x = vel[0][0]
+		vel_cmd.angular.z = vel[0][1]
+		pub_cmd.publish(vel_cmd)
 
 	'''if (policy is None) or (cmdpub is None):
 		return 
@@ -203,6 +210,9 @@ def execute(policy):
 	twist.angular.y = 0.0
 	twist.angular.z = y[0][1]
 	cmdpub.publish(twist)'''
+
+	#done training, return to idle
+	currmode=IDLE
 
 def clearDataset(D):
 	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
@@ -228,9 +238,6 @@ def learner():
 	# Initialize model (For now, its just odom as input)
 	model = ImitationNet(control_dim=2, device='cpu')
 
-	# init policy
-	policy = None
-
 	# main loop
 	while not rospy.is_shutdown():
 		if currmode == COLLECT:
@@ -238,16 +245,11 @@ def learner():
 			D = collect(D)
 		elif currmode == TRAIN:
 			# code comes here
-			policy = train(model, D)
+			train(model, D)
 		elif currmode == EXECUTE:
 			# code comes here
-			execute(policy)
+			execute(model)
 		else:
-			#pass through
-			pass
-			#if command is not None:
-			#	cmdpub.publish(command)
-
 			# write data to json file and reset D
 			if len(D['robot_pos']) > 0:
 				recordData2File(D)
@@ -265,4 +267,5 @@ if __name__=='__main__':
 	rospy.init_node('learner', anonymous=True)
 	# add ROS publishers
 	pub_reset = rospy.Publisher("reset_robot_pos", Bool, queue_size=10)
+	pub_cmd = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
 	learner()

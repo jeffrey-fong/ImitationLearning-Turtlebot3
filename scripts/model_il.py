@@ -126,6 +126,27 @@ def train(model):
     model.save(args.save_dir + "model" + ".pt")
 
 
+def test(model, odom_input):
+    # model initialization
+    model = ImitationNet(control_dim=2, device=args.device)
+    # Load any existing model
+    if os.path.exists(args.save_dir + 'model.pt'):
+        model.load(args.save_dir + 'model.pt')
+    model = model.to(args.device)
+
+    odom_input = torch.tensor(odom_input).detach().to(args.device).type(torch.float32)
+
+    # Normalize input
+    odom_input[:,0] = odom_input[:,0] / 7.5
+    odom_input[:,1] = odom_input[:,1] / 5
+
+    vel_predict = model(odom_input=odom_input, batch_size=1)
+
+    vel_predict[:,0] = vel_predict[:,0] * 0.5
+    vel_predict[:,1] = vel_predict[:,1] * 2.84
+
+    return vel_predict.cpu().detach().numpy()
+
 
 # Organizing all network hyperparameters into a parser upon initalization
 parser = argparse.ArgumentParser(description="network hyperparameters")
