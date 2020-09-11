@@ -14,7 +14,7 @@ import json
 
 
 class ImitationDataset(Dataset):
-    def __init__(self, device='cpu', is_test=False):
+    def __init__(self, device='cpu', is_val=False, is_test=False):
         super(ImitationDataset, self).__init__()
 
         # Initializing attributes
@@ -54,24 +54,29 @@ class ImitationDataset(Dataset):
 
             i += 1
 
-        # Separate into train or test set (80%-20%)
-        if is_test:
-            start, end = -int(self.poses.shape[0]*0.2), -1
-        else:
-            start, end = 0, -int(self.poses.shape[0]*0.2)
+        self.velocities = self.velocities[:,-1]
+        self.velocities = np.expand_dims(self.velocities, axis=1)
 
-        # Convert numpy to tensors
-        self.poses = torch.tensor(self.poses[start:end]).detach().to(self.device).type(torch.float32)
-        self.scans = torch.tensor(self.scans[start:end]).detach().to(self.device).type(torch.float32)
-        self.velocities = torch.tensor(self.velocities[start:end]).detach().to(self.device).type(torch.float32)
+        if not is_test:
+            # Normalize data
+            # (House dimension: x{-7.5 to 7.5}, y{-5 to 5})
+            # Max Linear Vel: 0.5   Max Angular Vel: 2.84
+            self.poses[:,0] = self.poses[:,0] / 7.5
+            self.poses[:,1] = self.poses[:,1] / 5
+            #self.velocities[:,0] = self.velocities[:,0] / np.max(np.abs(self.velocities[:,0]))
+            #self.velocities[:,1] = self.velocities[:,1] / np.max(np.abs(self.velocities[:,1]))
+            self.velocities = self.velocities / np.max(np.abs(self.velocities))
 
-        # Normalize data
-        # (House dimension: x{-7.5 to 7.5}, y{-5 to 5})
-        # Max Linear Vel: 0.5   Max Angular Vel: 2.84
-        self.poses[:,0] = self.poses[:,0] / 7.5
-        self.poses[:,1] = self.poses[:,1] / 5
-        self.velocities[:,0] = self.velocities[:,0] / 0.5
-        self.velocities[:,1] = self.velocities[:,1] / 2.84
+            # Separate into train or test set (80%-20%)
+            if is_val:
+                start, end = -int(self.poses.shape[0]*0.2), -1
+            else:
+                start, end = 0, -int(self.poses.shape[0]*0.2)
+
+            # Convert numpy to tensors
+            self.poses = torch.tensor(self.poses[start:end]).detach().to(self.device).type(torch.float32)
+            self.scans = torch.tensor(self.scans[start:end]).detach().to(self.device).type(torch.float32)
+            self.velocities = torch.tensor(self.velocities[start:end]).detach().to(self.device).type(torch.float32)
 
     def __len__(self):
         return self.poses.shape[0]
@@ -83,7 +88,7 @@ class ImitationDataset(Dataset):
 # Unit test
 def unitTest():
     train_data = ImitationDataset()
-    test_data = ImitationDataset(is_test=True)
+    test_data = ImitationDataset(is_val=True)
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=50, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=50, shuffle=True)
     # iterate through example data

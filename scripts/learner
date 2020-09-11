@@ -26,6 +26,7 @@ import os
 
 from model_il import ImitationNet
 import model_il
+from dataset import ImitationDataset
 
 
 # global data msgs
@@ -179,37 +180,18 @@ def execute(model):
 	global currmode
 
 	vel_cmd = Twist()
+	test_data = ImitationDataset(is_test=True)
 
-	while abs(pos.pose.pose.position.x - 6.0) > 0.01 and \
+	# Keep executing until goal is reached
+	while abs(pos.pose.pose.position.x - 6.0) > 0.01 or \
 			abs(pos.pose.pose.position.y + 1.0) > 0.01:
 		# execute policy
 		odom_input = np.array([[pos.pose.pose.position.x, pos.pose.pose.position.y,
 								pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]])
-		vel = model_il.test(model, odom_input)
-		vel_cmd.linear.x = vel[0][0]
-		vel_cmd.angular.z = vel[0][1]
+		vel = model_il.test(model, test_data, odom_input)
+		vel_cmd.linear.x = 0.22
+		vel_cmd.angular.z = vel[0]
 		pub_cmd.publish(vel_cmd)
-
-	'''if (policy is None) or (cmdpub is None):
-		return 
-	X = [[pos.pose.pose.position.x, pos.pose.pose.position.y, pos.pose.pose.position.z, 
-				 pos.pose.pose.orientation.x, pos.pose.pose.orientation.y, 
-				 pos.pose.pose.orientation.z, pos.pose.pose.orientation.w ] ]
-
-	y = policy.predict(X)
-
-	# print
-	print("Prediction: ", y)
-
-	#publish msg
-	twist = Twist()
-	twist.linear.x = y[0][0]
-	twist.linear.y = 0.0
-	twist.linear.z = 0.0
-	twist.angular.x = 0.0
-	twist.angular.y = 0.0
-	twist.angular.z = y[0][1]
-	cmdpub.publish(twist)'''
 
 	#done training, return to idle
 	currmode=IDLE

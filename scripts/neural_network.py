@@ -8,13 +8,13 @@ class PoseToControl(nn.Module):
 
         self.in_to_control = nn.Sequential(
             nn.Linear(4, 64),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(64, 128),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(128, 32),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(32, control_dim),
-            nn.ReLU())
+            nn.Tanh())
 
     def forward(self, odom_input, batch_size):
         control = self.in_to_control(odom_input)

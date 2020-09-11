@@ -24,7 +24,7 @@ class ImitationNet(nn.Module):
     The inputs are robot pose (from odom) and laser scans and it outputs
     robot velocities.
     '''
-    def __init__(self, control_dim=2, device='cpu'):
+    def __init__(self, control_dim=1, device='cpu'):
         super(ImitationNet, self).__init__()
         self.device = device
         self.pose_to_control = neural_net.PoseToControl(control_dim=control_dim)
@@ -81,10 +81,10 @@ def validate(model, test_data, args):
 def train(model):
     # Load data using dataset script
     train_data = ImitationDataset(device=args.device)
-    test_data = ImitationDataset(is_test=True, device=args.device)
+    test_data = ImitationDataset(is_val=True, device=args.device)
 
     # model initialization
-    model = ImitationNet(control_dim=2, device=args.device)
+    model = ImitationNet(control_dim=1, device=args.device)
     # Load any existing model
     if os.path.exists(args.save_dir + 'model.pt'):
         model.load(args.save_dir + 'model.pt')
@@ -126,9 +126,9 @@ def train(model):
     model.save(args.save_dir + "model" + ".pt")
 
 
-def test(model, odom_input):
+def test(model, data, odom_input):
     # model initialization
-    model = ImitationNet(control_dim=2, device=args.device)
+    model = ImitationNet(control_dim=1, device=args.device)
     # Load any existing model
     if os.path.exists(args.save_dir + 'model.pt'):
         model.load(args.save_dir + 'model.pt')
@@ -142,15 +142,14 @@ def test(model, odom_input):
 
     vel_predict = model(odom_input=odom_input, batch_size=1)
 
-    vel_predict[:,0] = vel_predict[:,0] * 0.5
-    vel_predict[:,1] = vel_predict[:,1] * 2.84
+    vel_predict = vel_predict * np.max(np.abs(data.velocities))
 
     return vel_predict.cpu().detach().numpy()
 
 
 # Organizing all network hyperparameters into a parser upon initalization
 parser = argparse.ArgumentParser(description="network hyperparameters")
-parser.add_argument('--epochs', type=int, default=20)
+parser.add_argument('--epochs', type=int, default=200)
 parser.add_argument('--lr', type=float, default=0.002)
 parser.add_argument('--lr_decay', type=float, default=0.998)
 parser.add_argument('--batch_size', type=int, default=64)
