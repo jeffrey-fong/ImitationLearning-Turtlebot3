@@ -9,6 +9,7 @@ import rospy
 import actionlib
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from std_msgs.msg import String, Bool
+from geometry_msgs.msg import Twist
 
 
 
@@ -29,9 +30,13 @@ class Expert:
 
 		# Initialize misc variables
 		self.mode = ''
+		self.initial_cmd = Twist()
+		self.initial_cmd.linear.x = 0.22
+		self.initial_cmd.angular.z = -0.09
 
 		# Initialize ROS publishers and subscribers
 		self.pub_mode = rospy.Publisher("learner_feedback", Bool, queue_size=10)
+		self.pub_cmd = rospy.Publisher("cmd_vel", Twist, queue_size=10)
 		self.sub_mode = rospy.Subscriber(
 									"learner_mode", String, self.learnerModeCallback)
 
@@ -52,6 +57,8 @@ class Expert:
 			self.pub_mode.publish(False)
 
 	def moveToGoal(self):
+		for i in range(4):
+			self.pub_cmd.publish(self.initial_cmd)
 		# Send goal (cancel thereafter if dagger)
 		self.client.send_goal(self.goal)
 

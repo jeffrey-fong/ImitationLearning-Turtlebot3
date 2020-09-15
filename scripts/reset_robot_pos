@@ -13,6 +13,15 @@ from std_msgs.msg import Bool
 
 
 def resetRobotPositionCallback(msg):
+	resetRobotPosition()
+
+def resetRobotPosition():
+	# Stop velocity
+	cmd_msg = Twist()
+	cmd_msg.linear.x = 0.0
+	cmd_msg.angular.z = 0.0
+	pub_cmd.publish(cmd_msg)
+
 	# Reset in Gazebo
 	state_msg = ModelState()
 	state_msg.model_name = 'turtlebot3'
@@ -59,8 +68,11 @@ if __name__=='__main__':
 	br = tf.TransformBroadcaster()
 	pub_resetrviz = rospy.Publisher(
 							"/initialpose", PoseWithCovarianceStamped, queue_size=10)
+	pub_cmd = rospy.Publisher(
+							"cmd_vel", Twist, queue_size=10)
 	sub_reset = rospy.Subscriber('reset_robot_pos', Bool, resetRobotPositionCallback)
 	rospy.sleep(0.1)
+	resetRobotPosition()
 
 	rospy.spin()
 

@@ -23,6 +23,7 @@ from sklearn.linear_model import Ridge
 import json
 
 import os
+from collections import deque
 
 from model_il import ImitationNet
 import model_il
@@ -46,6 +47,7 @@ currmode = None
 
 # constant for trajectory saving file name
 num_traj = 0
+
 
 # Topic Callbacks
 def cmdCallback(vel):
@@ -128,6 +130,9 @@ def recordData2File(D):
 	global num_traj
 
 	file_name = "./data/trajectory_" + str(num_traj) + '.json'
+	while os.path.exists(file_name):
+		num_traj += 1
+		file_name = "./data/trajectory_" + str(num_traj) + '.json'
 
 	# Process trajectory data. Remove all datapoints that are zero velocities
 	i = 0
@@ -145,23 +150,21 @@ def recordData2File(D):
 		num_traj += 1
 
 
-def collect(D):
+def collect(D, slide_window_D, window_length):
 	# data collection code 
 	if (command is not None) and (pos is not None): 
-		robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y, 
-						pos.pose.pose.position.z, 
-					 	pos.pose.pose.orientation.x, pos.pose.pose.orientation.y, 
-					 	pos.pose.pose.orientation.z, pos.pose.pose.orientation.w ] 
+		robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
+					pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]
 		robot_vel = [command.linear.x, command.angular.z]
-		D["robot_pos"] += [ robot_pos ]
-		D["laser_scan"] += [ laser.ranges ]
-		D["robot_vel"] += [ robot_vel ]
-		print("Stored", robot_pos, robot_vel)
-	else:
-		print(command)
-		print(pos)
 
-	return D
+		slide_window_D.append([robot_pos, laser.ranges, robot_vel])
+		if len(slide_window_D) > 5:
+			slide_window_D.popleft()
+			D["robot_pos"] += [[slide_window_D[j][0] for j in range(window_length)]]
+			D["laser_scan"] += [[slide_window_D[j][1] for j in range(window_length)]]
+			D["robot_vel"] += [slide_window_D[-1][2]]
+
+	return D, slide_window_D
 
 
 def train(model, dataset):
@@ -176,29 +179,46 @@ def train(model, dataset):
 	#done training, return to idle
 	currmode=IDLE
 
-def execute(model):
+def execute(model, slide_window_D, window_length):
 	global currmode
 
+	laser_slide_window = deque()
 	vel_cmd = Twist()
 	test_data = ImitationDataset(is_test=True)
+	model.eval()
 
 	# Keep executing until goal is reached
 	while abs(pos.pose.pose.position.x - 6.0) > 0.01 or \
 			abs(pos.pose.pose.position.y + 1.0) > 0.01:
-		# execute policy
-		odom_input = np.array([[pos.pose.pose.position.x, pos.pose.pose.position.y,
-								pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]])
-		vel = model_il.test(model, test_data, odom_input)
-		vel_cmd.linear.x = 0.22
-		vel_cmd.angular.z = vel[0]
+		# Preprocess input
+		slide_window_D.append([pos.pose.pose.position.x, 
+								pos.pose.pose.position.y,
+								pos.pose.pose.orientation.z, 
+								pos.pose.pose.orientation.w])
+		laser_slide_window.append([laser.ranges])
+		if len(slide_window_D) > 5:
+			slide_window_D.popleft()
+			laser_slide_window.popleft()
+			odom_input = np.array([slide_window_D])
+			laser_scan = np.array([laser_slide_window])
+			vel = model_il.test(model, test_data, odom_input, laser_scan)
+			vel_cmd.linear.x = vel[0,0]
+			vel_cmd.angular.z = vel[0,1] * 2.0
+		else:
+			vel = [-0.09]
+			vel_cmd.linear.x = 0.22
+			vel_cmd.angular.z = vel[0]
+
+		#vel = model_il.test(model, test_data, odom_input)
 		pub_cmd.publish(vel_cmd)
 
 	#done training, return to idle
 	currmode=IDLE
 
-def clearDataset(D):
+def clearDataset(D, slide_window_D):
 	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
-	return D
+	slide_window_D.clear()
+	return D, slide_window_D
 
 
 def learner():
@@ -214,8 +234,11 @@ def learner():
 	
 	rate = rospy.Rate(10) #Hz
 
-	# dataset
+	# Initialize dataset
 	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
+	# Initialize queue for sliding window
+	slide_window_D = deque()
+	window_length = 5
 
 	# Initialize model (For now, its just odom as input)
 	model = ImitationNet(control_dim=2, device='cpu')
@@ -224,18 +247,18 @@ def learner():
 	while not rospy.is_shutdown():
 		if currmode == COLLECT:
 			# code comes here
-			D = collect(D)
+			D, slide_window_D = collect(D, slide_window_D, window_length)
 		elif currmode == TRAIN:
 			# code comes here
 			train(model, D)
 		elif currmode == EXECUTE:
 			# code comes here
-			execute(model)
+			execute(model, slide_window_D, window_length)
 		else:
 			# write data to json file and reset D
 			if len(D['robot_pos']) > 0:
 				recordData2File(D)
-			D = clearDataset(D)
+			D, slide_window_D = clearDataset(D, slide_window_D)
 
 		# any extra things to do per loop comes here 
 

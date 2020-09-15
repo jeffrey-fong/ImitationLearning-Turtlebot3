@@ -36,9 +36,8 @@ class ImitationDataset(Dataset):
             with open(file_path+'trajectory_'+str(i)+'.json', 'r') as file:
                 traj_dict = json.load(file)
 
-            # Remove position.z, orientation.x and y
-            traj_pos = np.delete(np.array(list(traj_dict.items())[0][-1]), 
-                                    [2,3,4], axis=1)
+            # Convert the relevant parts to corresponding numpy arrays
+            traj_pos = np.array(list(traj_dict.items())[0][-1])
             traj_scan = np.array(list(traj_dict.items())[1][-1])
             traj_vel = np.array(list(traj_dict.items())[2][-1])
 
@@ -53,19 +52,21 @@ class ImitationDataset(Dataset):
                                                     axis=0)
 
             i += 1
-
-        self.velocities = self.velocities[:,-1]
-        self.velocities = np.expand_dims(self.velocities, axis=1)
+        # Just consider the angular velocity only
+        #self.velocities = self.velocities[:,-1]
+        #self.velocities = np.expand_dims(self.velocities, axis=1)
+        self.scans[self.scans == np.inf] = 0
 
         if not is_test:
             # Normalize data
             # (House dimension: x{-7.5 to 7.5}, y{-5 to 5})
             # Max Linear Vel: 0.5   Max Angular Vel: 2.84
-            self.poses[:,0] = self.poses[:,0] / 7.5
-            self.poses[:,1] = self.poses[:,1] / 5
-            #self.velocities[:,0] = self.velocities[:,0] / np.max(np.abs(self.velocities[:,0]))
-            #self.velocities[:,1] = self.velocities[:,1] / np.max(np.abs(self.velocities[:,1]))
-            self.velocities = self.velocities / np.max(np.abs(self.velocities))
+            self.poses[:,:,0] = self.poses[:,:,0] / 7.5
+            self.poses[:,:,1] = self.poses[:,:,1] / 5
+            self.scans = self.scans / np.max(self.scans)
+            self.velocities[:,0] = self.velocities[:,0] / np.max(np.abs(self.velocities[:,0]))
+            self.velocities[:,1] = (self.velocities[:,1] + np.abs(np.min(self.velocities[:,1])))
+            self.velocities[:,1] = self.velocities[:,1] / np.max(self.velocities[:,1])
 
             # Separate into train or test set (80%-20%)
             if is_val:
@@ -92,10 +93,10 @@ def unitTest():
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=50, shuffle=True)
     test_loader = torch.utils.data.DataLoader(test_data, batch_size=50, shuffle=True)
     # iterate through example data
-    for pose, scan, vel in train_loader:
+    '''for pose, scan, vel in train_loader:
         print('train:', pose.size())
     for pose, scan, vel in test_loader:
-        print('test:', pose.size())
+        print('test:', pose.size())'''
 
 
 if __name__ == "__main__":

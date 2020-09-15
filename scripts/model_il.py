@@ -15,7 +15,7 @@ import neural_network as neural_net
 from dataset import ImitationDataset
 
 
-torch.manual_seed(20)
+torch.manual_seed(10)
 
 
 class ImitationNet(nn.Module):
@@ -24,24 +24,35 @@ class ImitationNet(nn.Module):
     The inputs are robot pose (from odom) and laser scans and it outputs
     robot velocities.
     '''
-    def __init__(self, control_dim=1, device='cpu'):
+    def __init__(self, control_dim=2, device='cpu'):
         super(ImitationNet, self).__init__()
         self.device = device
         self.pose_to_control = neural_net.PoseToControl(control_dim=control_dim)
 
-    def forward(self, odom_input, batch_size):
+    def forward(self, odom_input, laser_scan, batch_size, seq_len, h0, c0):
         '''
         Forward pass of the model
         '''
-        control_predict = self.pose_to_control(odom_input, batch_size)
+        control_predict = self.pose_to_control(odom_input, laser_scan, 
+                                                batch_size, seq_len, h0, c0)
         return control_predict
 
-    def step(self, odom_input, target_control):
+    def step(self, odom_input, laser_scan, target_control):
         """
-        Perform one forward and backward pass of the network
+        Perform one forward and backward pass of the network (odom: 5x4)
         """
-        control_predict = self.forward(odom_input, odom_input.size(0))
-        total_loss = ((control_predict-target_control).pow(2)).mean(dim=0).sum()
+        batch_size = odom_input.size(0)
+        seq_len = odom_input.size(1)
+
+        h0 = torch.rand(batch_size, 2).view(1,batch_size,2).to(args.device)
+        c0 = torch.rand(batch_size, 2).view(1,batch_size,2).to(args.device)
+
+        odom_input = torch.reshape(odom_input, (batch_size*seq_len,4))
+        laser_scan = torch.reshape(laser_scan, (batch_size*seq_len,360))
+        control_predict = self.forward(odom_input, laser_scan, batch_size, 
+                                            seq_len, h0, c0)
+
+        total_loss = (10000 * (control_predict-target_control).pow(2)).mean(dim=0).sum()
         return total_loss
 
     def save(self, path):
@@ -69,7 +80,13 @@ def validate(model, test_data, args):
 
     # Get the predictions and compute validation loss
     for pose, scan, vel in test_data:
-        control_predict = model(odom_input=pose, batch_size=pose.size(0))
+        h0 = torch.rand(pose.size(0), 2).view(1,pose.size(0),2).to(args.device)
+        c0 = torch.rand(pose.size(0), 2).view(1,pose.size(0),2).to(args.device)
+        temp_pose = torch.reshape(pose, (pose.size(0)*pose.size(1),4))
+        temp_scan = torch.reshape(scan, (pose.size(0)*pose.size(1),360))
+        control_predict = model(odom_input=temp_pose, laser_scan=temp_scan, 
+                                batch_size=pose.size(0), seq_len=pose.size(1), 
+                                h0=h0, c0=c0)
         loss_val = (control_predict - vel).pow(2).mean().sqrt()
 
     # Switch back to training mode
@@ -84,7 +101,7 @@ def train(model):
     test_data = ImitationDataset(is_val=True, device=args.device)
 
     # model initialization
-    model = ImitationNet(control_dim=1, device=args.device)
+    model = ImitationNet(control_dim=2, device=args.device)
     # Load any existing model
     if os.path.exists(args.save_dir + 'model.pt'):
         model.load(args.save_dir + 'model.pt')
@@ -107,7 +124,8 @@ def train(model):
         for pose, scan, vel in train_loader:
             # Forward and Backward pass
             opt.zero_grad()
-            loss = model.step(odom_input=pose, target_control=vel)
+            loss = model.step(odom_input=pose, laser_scan=scan, 
+                                    target_control=vel)
             loss.backward()
             opt.step()
             # Append to the list of losses
@@ -126,23 +144,34 @@ def train(model):
     model.save(args.save_dir + "model" + ".pt")
 
 
-def test(model, data, odom_input):
+def test(model, data, odom_input, laser_scan):
     # model initialization
-    model = ImitationNet(control_dim=1, device=args.device)
+    model = ImitationNet(control_dim=2, device=args.device)
     # Load any existing model
     if os.path.exists(args.save_dir + 'model.pt'):
         model.load(args.save_dir + 'model.pt')
     model = model.to(args.device)
 
     odom_input = torch.tensor(odom_input).detach().to(args.device).type(torch.float32)
+    laser_scan[laser_scan == np.inf] = 0
+    laser_scan = torch.tensor(laser_scan).detach().to(args.device).type(torch.float32)
 
     # Normalize input
     odom_input[:,0] = odom_input[:,0] / 7.5
     odom_input[:,1] = odom_input[:,1] / 5
+    laser_scan = laser_scan / np.max(data.scans)
 
-    vel_predict = model(odom_input=odom_input, batch_size=1)
+    h0 = torch.rand(1, 2).view(1,1,2).to(args.device)
+    c0 = torch.rand(1, 2).view(1,1,2).to(args.device)
 
-    vel_predict = vel_predict * np.max(np.abs(data.velocities))
+    temp_odom = torch.reshape(odom_input, (odom_input.size(0)*odom_input.size(1),4))
+    temp_laser = torch.reshape(laser_scan, (odom_input.size(0)*odom_input.size(1),360))
+    vel_predict = model(odom_input=temp_odom, laser_scan=temp_laser, 
+                            batch_size=1, seq_len=5, h0=h0, c0=c0)
+
+    vel_predict[:,0] = vel_predict[:,0] * np.max(np.abs(data.velocities[:,0]))
+    vel_predict[:,1] = vel_predict[:,1] * (np.max(data.velocities[:,1])+np.abs(np.min(data.velocities[:,1])))
+    vel_predict[:,1] = vel_predict[:,1] - np.abs(np.min(data.velocities[:,1]))
 
     return vel_predict.cpu().detach().numpy()
 
@@ -151,8 +180,8 @@ def test(model, data, odom_input):
 parser = argparse.ArgumentParser(description="network hyperparameters")
 parser.add_argument('--epochs', type=int, default=200)
 parser.add_argument('--lr', type=float, default=0.002)
-parser.add_argument('--lr_decay', type=float, default=0.998)
-parser.add_argument('--batch_size', type=int, default=64)
+parser.add_argument('--lr_decay', type=float, default=0.99)
+parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--save_dir', type=str, 
                     default='/home/jeffrey/catkin_ws/src/cs6244/models/')
 parser.add_argument('--device', type=str, default='cpu')
