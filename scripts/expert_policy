@@ -35,10 +35,10 @@ class Expert:
 		self.initial_cmd.angular.z = -0.09
 
 		# Initialize ROS publishers and subscribers
-		self.pub_mode = rospy.Publisher("learner_feedback", Bool, queue_size=10)
+		self.pub_feedback = rospy.Publisher("learner_feedback", String, queue_size=10)
 		self.pub_cmd = rospy.Publisher("cmd_vel", Twist, queue_size=10)
 		self.sub_mode = rospy.Subscriber(
-									"learner_mode", String, self.learnerModeCallback)
+							"learner_mode", String, self.learnerModeCallback)
 
 	def learnerModeCallback(self, msg):
 		# Check whether dagger or supervised
@@ -46,30 +46,26 @@ class Expert:
 			self.mode = 'dagger'
 			print('Executing just one step')
 			self.moveToGoal()
-			self.pub_mode.publish(True)
 		elif msg.data == 'supervised':
 			self.mode = 'supervised'
 			print('Executing the entire trajectory')
+			for i in range(4):
+				self.pub_cmd.publish(self.initial_cmd)
 			self.moveToGoal()
-			self.pub_mode.publish(True)
+			self.pub_feedback.publish('reset')
 		else:
 			print('Wrong input. Feedback to learner')
-			self.pub_mode.publish(False)
+			self.pub_feedback.publish('reset')
 
 	def moveToGoal(self):
-		for i in range(4):
-			self.pub_cmd.publish(self.initial_cmd)
 		# Send goal (cancel thereafter if dagger)
 		self.client.send_goal(self.goal)
 
-		if self.mode == 'dagger':
-			rospy.sleep(2.0)
-			self.client.cancel_goal()
-
-		wait = self.client.wait_for_result()
-		if not wait:
-			rospy.logerr("Action server not available!")
-			rospy.signal_shutdown("Action server not available!")
+		if self.mode == 'supervised':
+			wait = self.client.wait_for_result()
+			if not wait:
+				rospy.logerr("Action server not available!")
+				rospy.signal_shutdown("Action server not available!")
 
 
 if __name__ == '__main__':
