@@ -50,6 +50,9 @@ currmode = None
 # constant for trajectory saving file name
 num_traj = 0
 
+# Initialize counter indicating episode ended
+is_ep_end = False
+
 
 # Topic Callbacks
 def cmdCallback(vel):
@@ -90,7 +93,7 @@ def cameraCallback(camera):
 	# Do somemore preprocessing here, if any
 
 def expertCallback(msg):
-	global currmode
+	global currmode, is_ep_end
 	if msg.data == 'reset':
 		# Reset robot pose in gazebo and rviz
 		rospy.sleep(1.0)
@@ -99,11 +102,11 @@ def expertCallback(msg):
 		rospy.sleep(0.1)
 		pub_reset.publish(True)		# Reset again to make sure reset at the right pose
 		currmode = IDLE
-	elif msg.data == 'dagger':
+	elif msg.data == 'done':
 		# One expert step done in dagger
+		print('received')
 		mutex.acquire()
-		to_stop = True
-		print(to_stop)
+		is_ep_end = True
 		mutex.release()
 
 
@@ -163,7 +166,8 @@ def recordData2File(D):
 		num_traj += 1
 
 
-def collect(D, slide_window_D, window_length):
+def collect(D, slide_window_D):
+	global currmode, is_ep_end
 	# data collection code
 	# need to create a loop here and determine network prediction or expert
 	# policy for 600 samples
@@ -171,7 +175,31 @@ def collect(D, slide_window_D, window_length):
 	# Start the expert planning first and let it run in the background
 	pub_expert.publish("dagger")
 
-	for sample_count in range(args.dagger_samples):
+	rate = rospy.Rate(10) #Hz
+
+	# Control robot until robot reached goal state
+	while True:
+		# Check is goal reached
+		mutex.acquire()
+		if is_ep_end:
+			print('test')
+			mutex.release()
+			# Stop the robot
+			mutex.acquire()
+			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
+			pub_cmd.publish(robot_cmd)
+			mutex.release()
+
+			# Update beta
+			args.beta *= args.beta_decay
+
+			# Change mode back to IDLE
+			print(len(D['robot_pos']), len(D['robot_pos'][0]))
+			print('Collection done. Going back to IDLE mode.')
+			currmode = IDLE
+			break
+		mutex.release()
+
 		# Determine whether to use expert or model policy
 		if random.random() <= args.beta:
 			# Sends expert policy commands
@@ -181,19 +209,25 @@ def collect(D, slide_window_D, window_length):
 		else:
 			# Run neural network and send the model policy commands
 			continue
-	# Publish dagger
-	#pub_expert.publish("dagger")
-	'''if (command is not None) and (pos is not None): 
-		robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
-					pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]
-		robot_vel = [command.linear.x, command.angular.z]
 
-		slide_window_D.append([robot_pos, laser.ranges, robot_vel])
-		if len(slide_window_D) > 5:
-			slide_window_D.popleft()
-			D["robot_pos"] += [[slide_window_D[j][0] for j in range(window_length)]]
-			D["laser_scan"] += [[slide_window_D[j][1] for j in range(window_length)]]
-			D["robot_vel"] += [slide_window_D[-1][2]]'''
+		# Update sliding window and D
+		if (command is not None) and (pos is not None):
+			robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
+						pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]
+			robot_vel = [command.linear.x, command.angular.z]
+
+			if len(slide_window_D) == 0:
+				for i in range(args.window_length):
+					slide_window_D.append([robot_pos, laser.ranges, robot_vel])
+			else:
+				slide_window_D.append([robot_pos, laser.ranges, robot_vel])
+				slide_window_D.popleft()
+				D["robot_pos"] += [[slide_window_D[j][0] for j in range(args.window_length)]]
+				D["laser_scan"] += [[slide_window_D[j][1] for j in range(args.window_length)]]
+				D["robot_vel"] += [slide_window_D[-1][2]]
+
+		# Sleep for the remaining time
+		rate.sleep()
 
 	return D, slide_window_D
 
@@ -210,7 +244,7 @@ def train(model, dataset):
 	#done training, return to idle
 	currmode=IDLE
 
-def execute(model, slide_window_D, window_length):
+def execute(model, slide_window_D):
 	global currmode
 
 	laser_slide_window = deque()
@@ -246,9 +280,11 @@ def execute(model, slide_window_D, window_length):
 	#done training, return to idle
 	currmode=IDLE
 
-def clearDataset(D, slide_window_D):
+def clearDataset():
+	# Initialize Dataset D
 	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
-	slide_window_D.clear()
+	# Define sliding window to be deque
+	slide_window_D = deque()
 	return D, slide_window_D
 
 
@@ -260,6 +296,7 @@ def learner(args):
 	rospy.Subscriber("/camera/rgb/image_raw", Image, cameraCallback)
 	rospy.Subscriber("learner_feedback", String, expertCallback)
 	rospy.Subscriber("/cmd_vel_temp", Twist, expertCmdCallback)
+	rospy.sleep(0.1)	# Wait a short while for subscribers to be ready
 
 	# service handler
 	modeservice = rospy.Service('mode_change', Mode, handleModeChange)
@@ -267,10 +304,7 @@ def learner(args):
 	rate = rospy.Rate(10) #Hz
 
 	# Initialize dataset
-	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
-	# Initialize queue for sliding window
-	slide_window_D = deque()
-	window_length = 5
+	D, slide_window_D = clearDataset()
 
 	# Initialize model (For now, its just odom as input)
 	model = ImitationNet(control_dim=2, device='cpu')
@@ -279,18 +313,19 @@ def learner(args):
 	while not rospy.is_shutdown():
 		if currmode == COLLECT:
 			# code comes here
-			D, slide_window_D = collect(D, slide_window_D, window_length)
+			D, slide_window_D = collect(D, slide_window_D)
 		elif currmode == TRAIN:
 			# code comes here
 			train(model, D)
 		elif currmode == EXECUTE:
 			# code comes here
-			execute(model, slide_window_D, window_length)
+			execute(model, slide_window_D)
 		else:
 			# write data to json file and reset D
-			if len(D['robot_pos']) > 0:
-				recordData2File(D)
-			D, slide_window_D = clearDataset(D, slide_window_D)
+			#if len(D['robot_pos']) > 0:
+			#	recordData2File(D)
+			D, slide_window_D = clearDataset()
+			print(len(slide_window_D))
 
 		# any extra things to do per loop comes here 
 
@@ -303,9 +338,10 @@ def learner(args):
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description="parse args")
 	parser.add_argument('--dagger_iter', type=int, default=40)
-	parser.add_argument('--dagger_samples', type=int, default=600)
+	parser.add_argument('--dagger_samples', type=int, default=60)
 	parser.add_argument('--beta', type=float, default=1.0)
 	parser.add_argument('--beta_decay', type=float, default=0.8)
+	parser.add_argument('--window_length', type=int, default=5)
 	args = parser.parse_args()
 
 	rospy.init_node('learner', anonymous=True)

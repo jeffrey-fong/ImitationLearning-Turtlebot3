@@ -61,11 +61,13 @@ class Expert:
 		# Send goal (cancel thereafter if dagger)
 		self.client.send_goal(self.goal)
 
-		if self.mode == 'supervised':
+		if self.mode == 'supervised' or self.mode == 'dagger':
 			wait = self.client.wait_for_result()
 			if not wait:
 				rospy.logerr("Action server not available!")
 				rospy.signal_shutdown("Action server not available!")
+			else:
+				self.pub_feedback.publish('done')
 
 
 if __name__ == '__main__':

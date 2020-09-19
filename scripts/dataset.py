@@ -56,6 +56,7 @@ class ImitationDataset(Dataset):
         #self.velocities = self.velocities[:,-1]
         #self.velocities = np.expand_dims(self.velocities, axis=1)
         self.scans[self.scans == np.inf] = 0
+        print(self.velocities.shape)
 
         if not is_test:
             # Normalize data
