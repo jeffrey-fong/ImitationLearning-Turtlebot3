@@ -55,8 +55,10 @@ class ImitationDataset(Dataset):
         # Just consider the angular velocity only
         #self.velocities = self.velocities[:,-1]
         #self.velocities = np.expand_dims(self.velocities, axis=1)
-        self.scans[self.scans == np.inf] = 0
-        print(self.velocities.shape)
+        try:
+            self.scans[self.scans == np.inf] = 0
+        except:
+            print('No trajectory files')
 
         if not is_test:
             # Normalize data

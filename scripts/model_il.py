@@ -178,10 +178,10 @@ def test(model, data, odom_input, laser_scan):
 
 # Organizing all network hyperparameters into a parser upon initalization
 parser = argparse.ArgumentParser(description="network hyperparameters")
-parser.add_argument('--epochs', type=int, default=200)
+parser.add_argument('--epochs', type=int, default=40)
 parser.add_argument('--lr', type=float, default=0.002)
 parser.add_argument('--lr_decay', type=float, default=0.99)
-parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--save_dir', type=str, 
                     default='/home/jeffrey/catkin_ws/src/cs6244/models/')
 parser.add_argument('--device', type=str, default='cpu')

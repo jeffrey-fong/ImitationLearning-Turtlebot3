@@ -166,7 +166,7 @@ def recordData2File(D):
 		num_traj += 1
 
 
-def collect(D, slide_window_D):
+def collect(model, D, slide_window_D):
 	global currmode, is_ep_end
 	# data collection code
 	# need to create a loop here and determine network prediction or expert
@@ -175,31 +175,23 @@ def collect(D, slide_window_D):
 	# Start the expert planning first and let it run in the background
 	pub_expert.publish("dagger")
 
+	# Initialize data for model policy
+	test_data = ImitationDataset(is_test=True)
+
+	# Initialize individual sliding windows for pose and laser
+	pose_window = deque()
+	laser_window = deque()
+	for i in range(args.window_length):
+		pose_window.append([pos.pose.pose.position.x, 
+							pos.pose.pose.position.y,
+							pos.pose.pose.orientation.z, 
+							pos.pose.pose.orientation.w])
+		laser_window.append([laser.ranges])
+
 	rate = rospy.Rate(10) #Hz
 
 	# Control robot until robot reached goal state
 	while True:
-		# Check is goal reached
-		mutex.acquire()
-		if is_ep_end:
-			print('test')
-			mutex.release()
-			# Stop the robot
-			mutex.acquire()
-			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
-			pub_cmd.publish(robot_cmd)
-			mutex.release()
-
-			# Update beta
-			args.beta *= args.beta_decay
-
-			# Change mode back to IDLE
-			print(len(D['robot_pos']), len(D['robot_pos'][0]))
-			print('Collection done. Going back to IDLE mode.')
-			currmode = IDLE
-			break
-		mutex.release()
-
 		# Determine whether to use expert or model policy
 		if random.random() <= args.beta:
 			# Sends expert policy commands
@@ -208,9 +200,89 @@ def collect(D, slide_window_D):
 			mutex.release()
 		else:
 			# Run neural network and send the model policy commands
-			continue
+			odom_input = np.array([pose_window])
+			laser_scan = np.array([laser_window])
+			vel = model_il.test(model, test_data, odom_input, laser_scan)
+			mutex.acquire()
+			robot_cmd.linear.x = vel[0,0]
+			robot_cmd.angular.z = vel[0,1]
+			print(vel)
+			pub_cmd.publish(robot_cmd)
+			mutex.release()
 
 		# Update sliding window and D
+		if (command is not None) and (pos is not None):
+			robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
+						pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]
+			robot_vel = [command.linear.x, command.angular.z]
+
+			if len(slide_window_D) == 0:
+				for i in range(args.window_length):
+					slide_window_D.append([robot_pos, laser.ranges, robot_vel])
+
+			else:
+				slide_window_D.append([robot_pos, laser.ranges, robot_vel])
+				slide_window_D.popleft()
+				pose_window.append(robot_pos)
+				laser_window.append([laser.ranges])
+				pose_window.popleft()
+				laser_window.popleft()
+				D["robot_pos"] += [[slide_window_D[j][0] for j in range(args.window_length)]]
+				D["laser_scan"] += [[slide_window_D[j][1] for j in range(args.window_length)]]
+				D["robot_vel"] += [slide_window_D[-1][2]]
+
+		# Check is goal reached
+		mutex.acquire()
+		if is_ep_end:
+			is_ep_end = False
+			mutex.release()
+			# Stop the robot
+			mutex.acquire()
+			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
+			pub_cmd.publish(robot_cmd)
+			mutex.release()
+			# Update beta
+			args.beta *= args.beta_decay
+			# Change mode back to IDLE
+			print(len(D['robot_pos']), len(D['robot_pos'][0]))
+			print('Collection done. Going back to IDLE mode.')
+			currmode = IDLE
+			break
+		mutex.release()
+
+		# Sleep for the remaining time
+		rate.sleep()
+
+	return D, slide_window_D
+
+
+def train(model):
+	global currmode
+
+	# train neural network
+	model_il.train(model)
+	model.eval()
+
+	print("Training round complete. Resetting robot to start")
+	pub_reset.publish(True)
+	rospy.sleep(0.1)
+	pub_reset.publish(True)		# Repeat to make sure reset at the right pose
+
+	#done training, return to idle
+	print("Returning to Idle mode.")
+	currmode=IDLE
+
+def execute(model, slide_window_D):
+	global currmode
+
+	laser_slide_window = deque()
+	vel_cmd = Twist()
+	test_data = ImitationDataset(is_test=True)
+	model.eval()
+
+	# Keep executing until goal is reached
+	while abs(pos.pose.pose.position.x - 6.0) > 0.01 or \
+			abs(pos.pose.pose.position.y + 1.0) > 0.01:
 		if (command is not None) and (pos is not None):
 			robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
 						pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]
@@ -226,41 +298,24 @@ def collect(D, slide_window_D):
 				D["laser_scan"] += [[slide_window_D[j][1] for j in range(args.window_length)]]
 				D["robot_vel"] += [slide_window_D[-1][2]]
 
-		# Sleep for the remaining time
-		rate.sleep()
-
-	return D, slide_window_D
-
-
-def train(model, dataset):
-	global currmode
-
-	# train neural network
-	model_il.train(model)
-	model.eval()
-
-	print("Training round complete. Returning to Idle mode.")
-
-	#done training, return to idle
-	currmode=IDLE
-
-def execute(model, slide_window_D):
-	global currmode
-
-	laser_slide_window = deque()
-	vel_cmd = Twist()
-	test_data = ImitationDataset(is_test=True)
-	model.eval()
-
-	# Keep executing until goal is reached
-	while abs(pos.pose.pose.position.x - 6.0) > 0.01 or \
-			abs(pos.pose.pose.position.y + 1.0) > 0.01:
 		# Preprocess input
-		slide_window_D.append([pos.pose.pose.position.x, 
-								pos.pose.pose.position.y,
-								pos.pose.pose.orientation.z, 
-								pos.pose.pose.orientation.w])
-		laser_slide_window.append([laser.ranges])
+		if len(slide_window_D) == 0:
+			for i in range(args.window_length):
+				slide_window_D.append([pos.pose.pose.position.x, 
+										pos.pose.pose.position.y,
+										pos.pose.pose.orientation.z, 
+										pos.pose.pose.orientation.w])
+				laser_slide_window.append([laser.ranges])
+		else:
+			slide_window_D.append([pos.pose.pose.position.x, 
+									pos.pose.pose.position.y,
+									pos.pose.pose.orientation.z, 
+									pos.pose.pose.orientation.w])
+			laser_slide_window.append([laser.ranges])
+			slide_window_D.popleft()
+			laser_slide_window.popleft()
+
+# ================================
 		if len(slide_window_D) > 5:
 			slide_window_D.popleft()
 			laser_slide_window.popleft()
@@ -313,19 +368,18 @@ def learner(args):
 	while not rospy.is_shutdown():
 		if currmode == COLLECT:
 			# code comes here
-			D, slide_window_D = collect(D, slide_window_D)
+			D, slide_window_D = collect(model, D, slide_window_D)
 		elif currmode == TRAIN:
 			# code comes here
-			train(model, D)
+			train(model)
 		elif currmode == EXECUTE:
 			# code comes here
 			execute(model, slide_window_D)
 		else:
 			# write data to json file and reset D
-			#if len(D['robot_pos']) > 0:
-			#	recordData2File(D)
+			if len(D['robot_pos']) > 0:
+				recordData2File(D)
 			D, slide_window_D = clearDataset()
-			print(len(slide_window_D))
 
 		# any extra things to do per loop comes here 
 
@@ -340,7 +394,7 @@ if __name__=='__main__':
 	parser.add_argument('--dagger_iter', type=int, default=40)
 	parser.add_argument('--dagger_samples', type=int, default=60)
 	parser.add_argument('--beta', type=float, default=1.0)
-	parser.add_argument('--beta_decay', type=float, default=0.8)
+	parser.add_argument('--beta_decay', type=float, default=0.9)
 	parser.add_argument('--window_length', type=int, default=5)
 	args = parser.parse_args()
 
