@@ -67,9 +67,9 @@ class ImitationDataset(Dataset):
             self.poses[:,:,0] = self.poses[:,:,0] / 7.5
             self.poses[:,:,1] = self.poses[:,:,1] / 5
             self.scans = self.scans / np.max(self.scans)
-            self.velocities[:,0] = self.velocities[:,0] / np.max(np.abs(self.velocities[:,0]))
+            '''self.velocities[:,0] = self.velocities[:,0] / np.max(np.abs(self.velocities[:,0]))
             self.velocities[:,1] = (self.velocities[:,1] + np.abs(np.min(self.velocities[:,1])))
-            self.velocities[:,1] = self.velocities[:,1] / np.max(self.velocities[:,1])
+            self.velocities[:,1] = self.velocities[:,1] / np.max(self.velocities[:,1])'''
 
             # Separate into train or test set (80%-20%)
             if is_val:

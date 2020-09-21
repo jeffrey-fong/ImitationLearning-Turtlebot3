@@ -33,6 +33,7 @@ class ImitationNet(nn.Module):
         '''
         Forward pass of the model
         '''
+        print(odom_input.size(), laser_scan.size())
         control_predict = self.pose_to_control(odom_input, laser_scan, 
                                                 batch_size, seq_len, h0, c0)
         return control_predict
@@ -169,19 +170,19 @@ def test(model, data, odom_input, laser_scan):
     vel_predict = model(odom_input=temp_odom, laser_scan=temp_laser, 
                             batch_size=1, seq_len=5, h0=h0, c0=c0)
 
-    vel_predict[:,0] = vel_predict[:,0] * np.max(np.abs(data.velocities[:,0]))
+    '''vel_predict[:,0] = vel_predict[:,0] * np.max(np.abs(data.velocities[:,0]))
     vel_predict[:,1] = vel_predict[:,1] * (np.max(data.velocities[:,1])+np.abs(np.min(data.velocities[:,1])))
-    vel_predict[:,1] = vel_predict[:,1] - np.abs(np.min(data.velocities[:,1]))
+    vel_predict[:,1] = vel_predict[:,1] - np.abs(np.min(data.velocities[:,1]))'''
 
     return vel_predict.cpu().detach().numpy()
 
 
 # Organizing all network hyperparameters into a parser upon initalization
 parser = argparse.ArgumentParser(description="network hyperparameters")
-parser.add_argument('--epochs', type=int, default=40)
+parser.add_argument('--epochs', type=int, default=50)
 parser.add_argument('--lr', type=float, default=0.002)
 parser.add_argument('--lr_decay', type=float, default=0.99)
-parser.add_argument('--batch_size', type=int, default=256)
+parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--save_dir', type=str, 
                     default='/home/jeffrey/catkin_ws/src/cs6244/models/')
 parser.add_argument('--device', type=str, default='cpu')
