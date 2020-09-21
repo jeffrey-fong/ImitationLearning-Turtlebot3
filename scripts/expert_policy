@@ -44,7 +44,7 @@ class Expert:
 		# Check whether dagger or supervised
 		if msg.data == 'dagger':
 			self.mode = 'dagger'
-			print('Executing just one step')
+			print('Executing dagger')
 			self.moveToGoal()
 		elif msg.data == 'supervised':
 			self.mode = 'supervised'
@@ -53,6 +53,9 @@ class Expert:
 				self.pub_cmd.publish(self.initial_cmd)
 			self.moveToGoal()
 			self.pub_feedback.publish('reset')
+		elif msg.data == 'stop':
+			print('cancelling goal')
+			self.client.cancel_goal()
 		else:
 			print('Wrong input. Feedback to learner')
 			self.pub_feedback.publish('reset')
@@ -61,13 +64,13 @@ class Expert:
 		# Send goal (cancel thereafter if dagger)
 		self.client.send_goal(self.goal)
 
-		if self.mode == 'supervised' or self.mode == 'dagger':
+		'''if self.mode == 'supervised' or self.mode == 'dagger':
 			wait = self.client.wait_for_result()
 			if not wait:
 				rospy.logerr("Action server not available!")
 				rospy.signal_shutdown("Action server not available!")
 			else:
-				self.pub_feedback.publish('done')
+				self.pub_feedback.publish('done')'''
 
 
 if __name__ == '__main__':

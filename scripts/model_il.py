@@ -33,7 +33,6 @@ class ImitationNet(nn.Module):
         '''
         Forward pass of the model
         '''
-        print(odom_input.size(), laser_scan.size())
         control_predict = self.pose_to_control(odom_input, laser_scan, 
                                                 batch_size, seq_len, h0, c0)
         return control_predict
@@ -49,7 +48,7 @@ class ImitationNet(nn.Module):
         c0 = torch.rand(batch_size, 2).view(1,batch_size,2).to(args.device)
 
         odom_input = torch.reshape(odom_input, (batch_size*seq_len,4))
-        laser_scan = torch.reshape(laser_scan, (batch_size*seq_len,360))
+        laser_scan = torch.reshape(laser_scan, (batch_size*seq_len,12))
         control_predict = self.forward(odom_input, laser_scan, batch_size, 
                                             seq_len, h0, c0)
 
@@ -84,7 +83,7 @@ def validate(model, test_data, args):
         h0 = torch.rand(pose.size(0), 2).view(1,pose.size(0),2).to(args.device)
         c0 = torch.rand(pose.size(0), 2).view(1,pose.size(0),2).to(args.device)
         temp_pose = torch.reshape(pose, (pose.size(0)*pose.size(1),4))
-        temp_scan = torch.reshape(scan, (pose.size(0)*pose.size(1),360))
+        temp_scan = torch.reshape(scan, (pose.size(0)*pose.size(1),12))
         control_predict = model(odom_input=temp_pose, laser_scan=temp_scan, 
                                 batch_size=pose.size(0), seq_len=pose.size(1), 
                                 h0=h0, c0=c0)
@@ -101,8 +100,6 @@ def train(model):
     train_data = ImitationDataset(device=args.device)
     test_data = ImitationDataset(is_val=True, device=args.device)
 
-    # model initialization
-    model = ImitationNet(control_dim=2, device=args.device)
     # Load any existing model
     if os.path.exists(args.save_dir + 'model.pt'):
         model.load(args.save_dir + 'model.pt')
@@ -144,10 +141,10 @@ def train(model):
     # Save and update the model after every full training round
     model.save(args.save_dir + "model" + ".pt")
 
+    return model
+
 
 def test(model, data, odom_input, laser_scan):
-    # model initialization
-    model = ImitationNet(control_dim=2, device=args.device)
     # Load any existing model
     if os.path.exists(args.save_dir + 'model.pt'):
         model.load(args.save_dir + 'model.pt')
@@ -155,18 +152,19 @@ def test(model, data, odom_input, laser_scan):
 
     odom_input = torch.tensor(odom_input).detach().to(args.device).type(torch.float32)
     laser_scan[laser_scan == np.inf] = 0
+    laser_scan = laser_scan[:,:,:,::30]
     laser_scan = torch.tensor(laser_scan).detach().to(args.device).type(torch.float32)
 
     # Normalize input
-    odom_input[:,0] = odom_input[:,0] / 7.5
-    odom_input[:,1] = odom_input[:,1] / 5
-    laser_scan = laser_scan / np.max(data.scans)
+    #odom_input[:,0] = odom_input[:,0] / 7.5
+    #odom_input[:,1] = odom_input[:,1] / 5
+    #laser_scan = laser_scan / np.max(data.scans)
 
     h0 = torch.rand(1, 2).view(1,1,2).to(args.device)
     c0 = torch.rand(1, 2).view(1,1,2).to(args.device)
 
     temp_odom = torch.reshape(odom_input, (odom_input.size(0)*odom_input.size(1),4))
-    temp_laser = torch.reshape(laser_scan, (odom_input.size(0)*odom_input.size(1),360))
+    temp_laser = torch.reshape(laser_scan, (odom_input.size(0)*odom_input.size(1),12))
     vel_predict = model(odom_input=temp_odom, laser_scan=temp_laser, 
                             batch_size=1, seq_len=5, h0=h0, c0=c0)
 
@@ -174,15 +172,15 @@ def test(model, data, odom_input, laser_scan):
     vel_predict[:,1] = vel_predict[:,1] * (np.max(data.velocities[:,1])+np.abs(np.min(data.velocities[:,1])))
     vel_predict[:,1] = vel_predict[:,1] - np.abs(np.min(data.velocities[:,1]))'''
 
-    return vel_predict.cpu().detach().numpy()
+    return vel_predict.cpu().detach().numpy(), model
 
 
 # Organizing all network hyperparameters into a parser upon initalization
 parser = argparse.ArgumentParser(description="network hyperparameters")
 parser.add_argument('--epochs', type=int, default=50)
 parser.add_argument('--lr', type=float, default=0.002)
-parser.add_argument('--lr_decay', type=float, default=0.99)
-parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--lr_decay', type=float, default=0.999)
+parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--save_dir', type=str, 
                     default='/home/jeffrey/catkin_ws/src/cs6244/models/')
 parser.add_argument('--device', type=str, default='cpu')

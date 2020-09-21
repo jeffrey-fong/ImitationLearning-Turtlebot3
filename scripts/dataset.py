@@ -57,6 +57,7 @@ class ImitationDataset(Dataset):
         #self.velocities = np.expand_dims(self.velocities, axis=1)
         try:
             self.scans[self.scans == np.inf] = 0
+            self.scans = self.scans[:,:,::30]
         except:
             print('No trajectory files')
 
@@ -64,9 +65,9 @@ class ImitationDataset(Dataset):
             # Normalize data
             # (House dimension: x{-7.5 to 7.5}, y{-5 to 5})
             # Max Linear Vel: 0.5   Max Angular Vel: 2.84
-            self.poses[:,:,0] = self.poses[:,:,0] / 7.5
-            self.poses[:,:,1] = self.poses[:,:,1] / 5
-            self.scans = self.scans / np.max(self.scans)
+            #self.poses[:,:,0] = self.poses[:,:,0] / 7.5
+            #self.poses[:,:,1] = self.poses[:,:,1] / 5
+            #self.scans = self.scans / np.max(self.scans)
             '''self.velocities[:,0] = self.velocities[:,0] / np.max(np.abs(self.velocities[:,0]))
             self.velocities[:,1] = (self.velocities[:,1] + np.abs(np.min(self.velocities[:,1])))
             self.velocities[:,1] = self.velocities[:,1] / np.max(self.velocities[:,1])'''
