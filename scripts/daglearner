@@ -169,9 +169,6 @@ def recordData2File(D):
 
 def collect(model, D, slide_window_D):
 	global currmode, is_ep_end
-	# data collection code
-	# need to create a loop here and determine network prediction or expert
-	# policy for 600 samples
 
 	# Start the expert planning first and let it run in the background
 	pub_expert.publish("dagger")
@@ -280,56 +277,67 @@ def train(model):
 
 	return model
 
-def execute(model, slide_window_D):
+def execute(model):
 	global currmode
 
-	laser_slide_window = deque()
-	vel_cmd = Twist()
-	test_data = ImitationDataset(is_test=True)
+	if os.path.exists(args.model_dir + 'model.pt'):
+		model.load(args.model_dir + 'model.pt')
+	model = model.to(args.device)
 	model.eval()
 
+	test_data = ImitationDataset(is_test=True)
+
+	# Initialize individual sliding windows for pose and laser
+	pose_window = deque()
+	laser_window = deque()
+
+	rate = rospy.Rate(10) #Hz
+
 	# Keep executing until goal is reached
-	while abs(pos.pose.pose.position.x - 6.0) > 0.01 or \
-			abs(pos.pose.pose.position.y + 1.0) > 0.01:
-		if (command is not None) and (pos is not None):
-			'''robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
-						pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]
-			robot_vel = [command.linear.x, command.angular.z]
-
-			if len(slide_window_D) == 0:
-				for i in range(args.window_length):
-					slide_window_D.append([robot_pos, laser.ranges, robot_vel])
-			else:
-				slide_window_D.append([robot_pos, laser.ranges, robot_vel])
-				slide_window_D.popleft()
-				D["robot_pos"] += [[slide_window_D[j][0] for j in range(args.window_length)]]
-				D["laser_scan"] += [[slide_window_D[j][1] for j in range(args.window_length)]]
-				D["robot_vel"] += [slide_window_D[-1][2]]'''
-
-		# Preprocess input
-		if len(slide_window_D) == 0:
+	while True:
+		# Preprocess/Update input
+		if len(pose_window) == 0:
 			for i in range(args.window_length):
-				slide_window_D.append([pos.pose.pose.position.x, 
+				pose_window.append([pos.pose.pose.position.x, 
 										pos.pose.pose.position.y,
 										pos.pose.pose.orientation.z, 
 										pos.pose.pose.orientation.w])
-				laser_slide_window.append([laser.ranges])
+				laser_window.append([laser.ranges])
 		else:
-			slide_window_D.append([pos.pose.pose.position.x, 
+			pose_window.append([pos.pose.pose.position.x, 
 									pos.pose.pose.position.y,
 									pos.pose.pose.orientation.z, 
 									pos.pose.pose.orientation.w])
-			laser_slide_window.append([laser.ranges])
-			slide_window_D.popleft()
-			laser_slide_window.popleft()
+			laser_window.append([laser.ranges])
+			pose_window.popleft()
+			laser_window.popleft()
 
 		# Run network policy to get control command 
-		odom_input = np.array([slide_window_D])
-		laser_scan = np.array([laser_slide_window])
-		vel = model_il.test(model, test_data, odom_input, laser_scan)
-		vel_cmd.linear.x = vel[0,0]
-		vel_cmd.angular.z = vel[0,1]
-		pub_cmd.publish(vel_cmd)
+		odom_input = np.array([pose_window])
+		laser_scan = np.array([laser_window])
+		vel, model = model_il.test(model, test_data, odom_input, laser_scan)
+		mutex.acquire()
+		robot_cmd.linear.x = vel[0,0]
+		robot_cmd.angular.z = vel[0,1]
+		print(vel)
+		pub_cmd.publish(robot_cmd)
+		mutex.release()
+
+		if abs(pos.pose.pose.position.x - 6.0) < 0.1 and \
+				abs(pos.pose.pose.position.y + 1.0) < 0.1:
+			# Stop the robot
+			mutex.acquire()
+			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
+			pub_cmd.publish(robot_cmd)
+			mutex.release()
+			# Change mode back to IDLE
+			print('Goal is reached. Testing round successful. Going back to IDLE mode.')
+			currmode = IDLE
+			break
+
+		# Sleep for the remaining time
+		rate.sleep()
+
 
 	#done training, return to idle
 	currmode=IDLE
@@ -373,7 +381,7 @@ def learner(args):
 			model = train(model)
 		elif currmode == EXECUTE:
 			# code comes here
-			execute(slide_window_D)
+			execute(model)
 		else:
 			# write data to json file and reset D
 			if len(D['robot_pos']) > 0:
@@ -395,6 +403,8 @@ if __name__=='__main__':
 	parser.add_argument('--beta', type=float, default=1.0)
 	parser.add_argument('--beta_decay', type=float, default=0.9)
 	parser.add_argument('--window_length', type=int, default=5)
+	parser.add_argument('--model_dir', type=str, 
+						default='/home/jeffrey/catkin_ws/src/cs6244/models/')
 	parser.add_argument('--device', type=str, default='cpu')
 	args = parser.parse_args()
 

@@ -179,7 +179,7 @@ def test(model, data, odom_input, laser_scan):
 parser = argparse.ArgumentParser(description="network hyperparameters")
 parser.add_argument('--epochs', type=int, default=50)
 parser.add_argument('--lr', type=float, default=0.002)
-parser.add_argument('--lr_decay', type=float, default=0.999)
+parser.add_argument('--lr_decay', type=float, default=1.0)
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--save_dir', type=str, 
                     default='/home/jeffrey/catkin_ws/src/cs6244/models/')
