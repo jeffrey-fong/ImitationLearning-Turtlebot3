@@ -51,9 +51,6 @@ currmode = None
 # constant for trajectory saving file name
 num_traj = 0
 
-# Initialize counter indicating episode ended
-is_ep_end = False
-
 
 # Topic Callbacks
 def cmdCallback(vel):
@@ -94,29 +91,19 @@ def cameraCallback(camera):
 	# Do somemore preprocessing here, if any
 
 def expertCallback(msg):
-	global currmode, is_ep_end
+	global currmode
 	if msg.data == 'reset':
 		# Reset robot pose in gazebo and rviz
 		rospy.sleep(1.0)
 		pub_reset.publish(True)
 		print('Changing mode back to idle.')
 		rospy.sleep(0.1)
-		pub_reset.publish(True)		# Reset again to make sure reset at the right pose
+		# Reset again to make sure reset at the right pose
+		pub_reset.publish(True)
 		currmode = IDLE
-	elif msg.data == 'done':
-		# One expert step done in dagger
-		print('received')
-		mutex.acquire()
-		is_ep_end = True
-		mutex.release()
-
 
 def handleModeChange(m):
-	global currmode
-	global pos
-	global laser
-	global image
-	global command
+	global currmode, pos, laser, image, command
 
 	reqmode = int(m.reqmode)
 	if reqmode == COLLECT:
@@ -146,6 +133,7 @@ def recordData2File(D):
 	"""
 	global num_traj
 
+	# Write to the correct file name
 	file_name = "./data/trajectory_" + str(num_traj) + '.json'
 	while os.path.exists(file_name):
 		num_traj += 1
@@ -161,14 +149,20 @@ def recordData2File(D):
 		else:
 			i += 1
 
+	# Write to json file
 	if len(D["robot_vel"]) > 0:
 		with open(file_name, 'w') as fout:
 			json.dump(D, fout)
 		num_traj += 1
 
+def resetRobotState():
+	pub_reset.publish(True)
+	rospy.sleep(0.1)
+	pub_reset.publish(True)		# Repeat to make sure reset at the right pose
+
 
 def collect(model, D, slide_window_D):
-	global currmode, is_ep_end
+	global currmode
 
 	# Start the expert planning first and let it run in the background
 	pub_expert.publish("dagger")
@@ -185,8 +179,6 @@ def collect(model, D, slide_window_D):
 							pos.pose.pose.orientation.z, 
 							pos.pose.pose.orientation.w])
 		laser_window.append([laser.ranges])
-
-	rate = rospy.Rate(10) #Hz
 
 	# Control robot until robot reached goal state
 	while True:
@@ -217,7 +209,6 @@ def collect(model, D, slide_window_D):
 			if len(slide_window_D) == 0:
 				for i in range(args.window_length):
 					slide_window_D.append([robot_pos, laser.ranges, robot_vel])
-
 			else:
 				slide_window_D.append([robot_pos, laser.ranges, robot_vel])
 				slide_window_D.popleft()
@@ -229,13 +220,9 @@ def collect(model, D, slide_window_D):
 				D["laser_scan"] += [[slide_window_D[j][1] for j in range(args.window_length)]]
 				D["robot_vel"] += [slide_window_D[-1][2]]
 
-		# Check is goal reached
-		mutex.acquire()
+		# Check if goal is reached
 		if abs(pos.pose.pose.position.x - 6.0) < 0.1 and \
 			abs(pos.pose.pose.position.y + 1.0) < 0.1:
-			print('test')
-			is_ep_end = False
-			mutex.release()
 			# Stop the robot
 			mutex.acquire()
 			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
@@ -244,15 +231,14 @@ def collect(model, D, slide_window_D):
 			# Update beta
 			args.beta *= args.beta_decay
 			# Change mode back to IDLE
-			print(len(D['robot_pos']), len(D['robot_pos'][0]))
 			print('Collection done. Going back to IDLE mode.')
 			currmode = IDLE
 			break
-		mutex.release()
 
 		# Sleep for the remaining time
 		rate.sleep()
 
+	# Stop the expert policy path planning
 	print('Stopping expert planning.')
 	pub_expert.publish('stop')
 
@@ -266,12 +252,11 @@ def train(model):
 	model = model_il.train(model)
 	model.eval()
 
+	# Reset robot to start state
 	print("Training round complete. Resetting robot to start")
-	pub_reset.publish(True)
-	rospy.sleep(0.1)
-	pub_reset.publish(True)		# Repeat to make sure reset at the right pose
+	resetRobotState()
 
-	#done training, return to idle
+	# Done training, return to idle
 	print("Returning to Idle mode.")
 	currmode=IDLE
 
@@ -279,6 +264,7 @@ def train(model):
 
 def execute(model):
 	global currmode
+
 
 	if os.path.exists(args.model_dir + 'model.pt'):
 		model.load(args.model_dir + 'model.pt')
@@ -290,8 +276,6 @@ def execute(model):
 	# Initialize individual sliding windows for pose and laser
 	pose_window = deque()
 	laser_window = deque()
-
-	rate = rospy.Rate(10) #Hz
 
 	# Keep executing until goal is reached
 	while True:
@@ -323,15 +307,18 @@ def execute(model):
 		pub_cmd.publish(robot_cmd)
 		mutex.release()
 
-		if abs(pos.pose.pose.position.x - 6.0) < 0.1 and \
-				abs(pos.pose.pose.position.y + 1.0) < 0.1:
+		if abs(pos.pose.pose.position.x - 6.0) < 0.2 and \
+				abs(pos.pose.pose.position.y + 1.0) < 0.2:
 			# Stop the robot
 			mutex.acquire()
 			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
 			pub_cmd.publish(robot_cmd)
 			mutex.release()
+			# Reset robot to start state
+			print("Goal is reached. Resetting robot to start")
+			resetRobotState()
 			# Change mode back to IDLE
-			print('Goal is reached. Testing round successful. Going back to IDLE mode.')
+			print('Testing round successful. Going back to IDLE mode.')
 			currmode = IDLE
 			break
 
@@ -365,22 +352,17 @@ def learner(args):
 
 	# Initialize model
 	model = ImitationNet(control_dim=2, device=args.device)
-	
-	rate = rospy.Rate(10) #Hz
 
-	# Initialize dataset
+	# Initialize dataset and sliding window for data recording
 	D, slide_window_D = clearDataset()
 
 	# main loop
 	while not rospy.is_shutdown():
 		if currmode == COLLECT:
-			# code comes here
 			D, slide_window_D, model = collect(model, D, slide_window_D)
 		elif currmode == TRAIN:
-			# code comes here
 			model = train(model)
 		elif currmode == EXECUTE:
-			# code comes here
 			execute(model)
 		else:
 			# write data to json file and reset D
@@ -388,10 +370,7 @@ def learner(args):
 				recordData2File(D)
 			D, slide_window_D = clearDataset()
 
-		# any extra things to do per loop comes here 
-
-
-		# sleep until we need
+		# sleep for the remaining time
 		rate.sleep()
 
 
@@ -400,7 +379,7 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description="parse args")
 	parser.add_argument('--dagger_iter', type=int, default=40)
 	parser.add_argument('--dagger_samples', type=int, default=60)
-	parser.add_argument('--beta', type=float, default=1.0)
+	parser.add_argument('--beta', type=float, default=0.59049)#1.0)
 	parser.add_argument('--beta_decay', type=float, default=0.9)
 	parser.add_argument('--window_length', type=int, default=5)
 	parser.add_argument('--model_dir', type=str, 
@@ -428,5 +407,8 @@ if __name__=='__main__':
 
 	# Initialize python mutex
 	mutex = Lock()
+
+	# Initialize rate for controlling robot and updating observations
+	rate = rospy.Rate(10) #Hz
 
 	learner(args)
