@@ -56,9 +56,7 @@ num_traj = 0
 def cmdCallback(vel):
 	global command
 	#rospy.loginfo(rospy.get_caller_id() + "command %s %s", vel.linear, vel.angular)
-	command = vel 
-
-	# your code comes here
+	command = vel
 
 def expertCmdCallback(vel):
 	'''
@@ -69,26 +67,15 @@ def expertCmdCallback(vel):
 	robot_cmd.angular.z = vel.angular.z
 	mutex.release()
 
-
 def laserCallback(scan):
 	global laser
 	#rospy.loginfo(rospy.get_caller_id() + "scan %s", scan.ranges)
 	laser = scan 
-	# your code comes here
-
 
 def odomCallback(odom):
 	global pos
 	#rospy.loginfo(rospy.get_caller_id() + "odom %s", odom.pose)
 	pos = odom 
-	# your code comes here
-
-
-def cameraCallback(camera):
-	global image
-	#rospy.loginfo(rospy.get_caller_id() + "image %s", camera.encoding)
-	image = camera
-	# Do somemore preprocessing here, if any
 
 def expertCallback(msg):
 	global currmode
@@ -265,7 +252,7 @@ def train(model):
 def execute(model):
 	global currmode
 
-
+	# Load model again
 	if os.path.exists(args.model_dir + 'model.pt'):
 		model.load(args.model_dir + 'model.pt')
 	model = model.to(args.device)
@@ -342,7 +329,6 @@ def learner(args):
 	rospy.Subscriber("cmd_vel", Twist, cmdCallback)
 	rospy.Subscriber("scan", LaserScan, laserCallback)
 	rospy.Subscriber("odom", Odometry, odomCallback)
-	rospy.Subscriber("/camera/rgb/image_raw", Image, cameraCallback)
 	rospy.Subscriber("learner_feedback", String, expertCallback)
 	rospy.Subscriber("/cmd_vel_temp", Twist, expertCmdCallback)
 	rospy.sleep(0.1)	# Wait a short while for subscribers to be ready
@@ -377,9 +363,7 @@ def learner(args):
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description="parse args")
-	parser.add_argument('--dagger_iter', type=int, default=40)
-	parser.add_argument('--dagger_samples', type=int, default=60)
-	parser.add_argument('--beta', type=float, default=0.59049)#1.0)
+	parser.add_argument('--beta', type=float, default=1.0)
 	parser.add_argument('--beta_decay', type=float, default=0.9)
 	parser.add_argument('--window_length', type=int, default=5)
 	parser.add_argument('--model_dir', type=str, 
@@ -395,7 +379,7 @@ if __name__=='__main__':
 	    print('cuda is not available')
 	    args.device = "cpu"
 
-	rospy.init_node('learner', anonymous=True)
+	rospy.init_node('daglearner', anonymous=True)
 
 	# add ROS publishers
 	pub_reset = rospy.Publisher("reset_robot_pos", Bool, queue_size=10)
