@@ -9,7 +9,7 @@
 
 
 import rospy
-from geometry_msgs.msg import Twist, Pose 
+from geometry_msgs.msg import Twist, Pose, PoseWithCovarianceStamped
 from sensor_msgs.msg import LaserScan, Image
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String, Bool
@@ -72,10 +72,15 @@ def laserCallback(scan):
 	#rospy.loginfo(rospy.get_caller_id() + "scan %s", scan.ranges)
 	laser = scan 
 
-def odomCallback(odom):
+'''def odomCallback(odom):
 	global pos
 	#rospy.loginfo(rospy.get_caller_id() + "odom %s", odom.pose)
-	pos = odom 
+	pos = odom '''
+
+def amclCallback(amcl):
+	global pos
+	#rospy.loginfo(rospy.get_caller_id() + "odom %s", odom.pose)
+	pos = amcl
 
 def expertCallback(msg):
 	global currmode
@@ -328,7 +333,8 @@ def learner(args):
 	# add callbacks
 	rospy.Subscriber("cmd_vel", Twist, cmdCallback)
 	rospy.Subscriber("scan", LaserScan, laserCallback)
-	rospy.Subscriber("odom", Odometry, odomCallback)
+	#rospy.Subscriber("odom", Odometry, odomCallback)
+	rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amclCallback)
 	rospy.Subscriber("learner_feedback", String, expertCallback)
 	rospy.Subscriber("/cmd_vel_temp", Twist, expertCmdCallback)
 	rospy.sleep(0.1)	# Wait a short while for subscribers to be ready

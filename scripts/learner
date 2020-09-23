@@ -9,7 +9,7 @@
 
 
 import rospy
-from geometry_msgs.msg import Twist, Pose 
+from geometry_msgs.msg import Twist, Pose, PoseWithCovarianceStamped
 from sensor_msgs.msg import LaserScan, Image
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String, Bool
@@ -302,6 +302,7 @@ def learner(args):
 	rospy.Subscriber("cmd_vel", Twist, cmdCallback)
 	rospy.Subscriber("scan", LaserScan, laserCallback)
 	rospy.Subscriber("odom", Odometry, odomCallback)
+	rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amclCallback)
 	rospy.Subscriber("/camera/rgb/image_raw", Image, cameraCallback)
 	rospy.Subscriber("learner_feedback", String, expertCallback)
 	rospy.Subscriber("/cmd_vel_temp", Twist, expertCmdCallback)
