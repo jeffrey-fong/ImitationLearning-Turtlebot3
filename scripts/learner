@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 
-# CS6244 Starter Learner 
-# This is a very simple learner just to get you started. It is not a good submission.
-# It implements some of the specifications listed and uses a simple ridge regressor 
-# with odometry as input (you don't really have ground truth odometry in real-life)
-# You are completely free to change the structure; I wrote this quickly so, it is
-# very unlikely to be the best structure or be bug free. :P
+# This script contains the standard supervised learning algorithm. It 
+# repeatedly collects episodes of expert demonstrations using the expert
+# policy with some additive noise and trains the neural network policy
+# with the collected dataset at the end. It also contains a separate 
+# execution feature that tests the current model in getting the robot from 
+# point A to point B.
 
 
 import rospy
+import actionlib
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from geometry_msgs.msg import Twist, Pose, PoseWithCovarianceStamped
 from sensor_msgs.msg import LaserScan, Image
 from nav_msgs.msg import Odometry
@@ -16,25 +18,19 @@ from std_msgs.msg import String, Bool
 from cs6244.srv import Mode, ModeResponse
 
 import numpy as np
-from sklearn.datasets import load_linnerud
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.linear_model import Ridge
 import json
 
 import argparse
 import os
-from collections import deque
 import random
-from threading import Lock
 
 from model_il import ImitationNet
 import model_il
-from dataset import ImitationDataset
 import torch
 
 
 # global data msgs
-command = None 
+expert_cmd = None
 laser = None 
 pos = None 
 image = None
@@ -44,7 +40,6 @@ IDLE = 0
 COLLECT = 1
 TRAIN = 2
 EXECUTE = 3
-CLEARDATA = 4
 
 currmode = None
 
@@ -52,45 +47,22 @@ currmode = None
 num_traj = 0
 
 
-# Topic Callbacks
-def cmdCallback(vel):
-	global command
-	#rospy.loginfo(rospy.get_caller_id() + "command %s %s", vel.linear, vel.angular)
-	command = vel
 
+# Topic Callbacks
 def expertCmdCallback(vel):
-	'''
-	Receives and updates the expert planner velocity commands
-	'''
-	mutex.acquire()
-	robot_cmd.linear.x = vel.linear.x
-	robot_cmd.angular.z = vel.angular.z
-	mutex.release()
+	global expert_cmd
+	expert_cmd = vel
 
 def laserCallback(scan):
 	global laser
-	#rospy.loginfo(rospy.get_caller_id() + "scan %s", scan.ranges)
 	laser = scan
 
-def odomCallback(odom):
+def amclCallback(amcl):
 	global pos
-	#rospy.loginfo(rospy.get_caller_id() + "odom %s", odom.pose)
-	pos = odom
-
-def expertCallback(msg):
-	global currmode
-	if msg.data == 'reset':
-		# Reset robot pose in gazebo and rviz
-		rospy.sleep(1.0)
-		pub_reset.publish(True)
-		print('Changing mode back to idle.')
-		rospy.sleep(0.1)
-		# Reset again to make sure reset at the right pose
-		pub_reset.publish(True)
-		currmode = IDLE
+	pos = amcl
 
 def handleModeChange(m):
-	global currmode, pos, laser, image, command
+	global currmode, pos, laser
 
 	reqmode = int(m.reqmode)
 	if reqmode == COLLECT:
@@ -114,27 +86,14 @@ def recordData2File(D):
 	"""
 	Process the latest trajectory data by removing all points that the turtlebot is not
 	moving and dump the trajectory into a json file.
-
-	Args:
-		D {dict} -- the current trajectory data.
 	"""
 	global num_traj
 
 	# Write to the correct file name
-	file_name = "./data/trajectory_" + str(num_traj) + '.json'
+	file_name = args.data_dir + "trajectory_" + str(num_traj) + '.json'
 	while os.path.exists(file_name):
 		num_traj += 1
-		file_name = "./data/trajectory_" + str(num_traj) + '.json'
-
-	# Process trajectory data. Remove all datapoints that are zero velocities
-	i = 0
-	while i < len(D["robot_vel"]):
-		if D["robot_vel"][i] == [0.0, 0.0]:
-			D["robot_pos"].pop(i)
-			D["laser_scan"].pop(i)
-			D["robot_vel"].pop(i)
-		else:
-			i += 1
+		file_name = args.data_dir + "trajectory_" + str(num_traj) + '.json'
 
 	# Write to json file
 	if len(D["robot_vel"]) > 0:
@@ -148,67 +107,90 @@ def resetRobotState():
 	pub_reset.publish(True)		# Repeat to make sure reset at the right pose
 
 
-def collect(D, slide_window_D):
-	global currmode
+def collect(D):
+	global currmode, expert_cmd, pos, laser
+
+	# Noise variable
+	noise_count = 0
+	noise = 0.0
 
 	# Start the expert planning first and let it run in the background
-	pub_expert.publish("supervised")
+	goal = MoveBaseGoal()
+	goal.target_pose.header.frame_id = "map"
+	goal.target_pose.header.stamp = rospy.Time.now()
+	goal.target_pose.pose.position.x = 6.0
+	goal.target_pose.pose.position.y = -1.0
+	goal.target_pose.pose.orientation.z = 0.7071
+	goal.target_pose.pose.orientation.w = -0.7071
+	client.send_goal(goal)
+	print('starting expert planning')
+
+	robot_cmd = Twist()
 
 	# Control robot until robot reached goal state
 	while True:
-		# Sends expert policy commands
-		mutex.acquire()
-		pub_cmd.publish(robot_cmd)
-		mutex.release()
-
-		# Update sliding window and D
-		if (command is not None) and (pos is not None):
-			robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
-						pos.pose.pose.orientation.z, pos.pose.pose.orientation.w]
-			robot_vel = [command.linear.x, command.angular.z]
-
-			if len(slide_window_D) == 0:
-				for i in range(args.window_length):
-					slide_window_D.append([robot_pos, laser.ranges, robot_vel])
-			else:
-				slide_window_D.append([robot_pos, laser.ranges, robot_vel])
-				slide_window_D.popleft()
-				D["robot_pos"] += [[slide_window_D[j][0] for j in range(args.window_length)]]
-				D["laser_scan"] += [[slide_window_D[j][1] for j in range(args.window_length)]]
-				D["robot_vel"] += [slide_window_D[-1][2]]
-
+		if expert_cmd is not None:
 		# Check if goal is reached
-		if abs(pos.pose.pose.position.x - 6.0) < 0.1 and \
-			abs(pos.pose.pose.position.y + 1.0) < 0.1:
-			# Stop the robot
-			mutex.acquire()
-			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
+			if (abs(pos.pose.pose.position.x - 6.0) < 0.5 and \
+				abs(pos.pose.pose.position.y + 1.0) < 0.1) or \
+				(expert_cmd.linear.x == 0.0 and expert_cmd.angular.z == 0.0):
+				print('test', pos.pose.pose.position.x)
+				# Stop the robot
+				robot_cmd = Twist()
+				robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
+				pub_cmd.publish(robot_cmd)
+				# Stop the expert policy path planning
+				print('Stopping expert planning.')
+				client.cancel_goal()
+				# Reset robot to start state
+				print("Demonstration complete. Resetting robot to start")
+				resetRobotState()
+				# Change mode back to IDLE
+				print('Collection done.')
+				currmode = IDLE
+				break
+
+		
+			# Always use expert policy
+			print('expert {:10.6f}, {:10.6f}'.format(expert_cmd.linear.x, expert_cmd.angular.z))
+			robot_cmd.linear.x = expert_cmd.linear.x
+			if noise_count % 100 == 0:
+				if np.random.randint(2):
+					noise = np.random.uniform(low=0.1, high=0.2)
+				else:
+					noise = np.random.uniform(low=-0.2, high=-0.1)
+			robot_cmd.angular.z = expert_cmd.angular.z + noise
 			pub_cmd.publish(robot_cmd)
-			mutex.release()
-			rospy.sleep(0.5)
-			# Reset robot to start state
-			print("Goal is reached. Resetting robot to start")
-			resetRobotState()
-			# Change mode back to IDLE
-			print('Collection done. Going back to IDLE mode.')
-			currmode = IDLE
-			break
+
+			# Update D
+			robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
+						pos.pose.pose.position.z, pos.pose.pose.orientation.x,
+						pos.pose.pose.orientation.y, pos.pose.pose.orientation.z, 
+						pos.pose.pose.orientation.w]
+			robot_vel = [expert_cmd.linear.x, expert_cmd.angular.z]
+
+			D["robot_pos"] += [robot_pos]
+			D["laser_scan"] += [laser.ranges]
+			D["robot_vel"] += [robot_vel]
+
+			noise_count += 1
 
 		# Sleep for the remaining time
 		rate.sleep()
 
-	# Stop the expert policy path planning
-	print('Stopping expert planning.')
-	pub_expert.publish('stop')
-
-	return D, slide_window_D
+	return D
 
 
-def train(model):
-	global currmode
+def train():
+	global currmode, model
+
+	# Load model again
+	if os.path.exists(args.model_dir + 'model.pt'):
+		model.load(args.model_dir + 'model.pt')
+	model = model.to(args.device)
 
 	# train neural network
-	model = model_il.train(model)
+	model = model_il.train(model, mode='supervised')
 	model.eval()
 
 	# Reset robot to start state
@@ -221,8 +203,8 @@ def train(model):
 
 	return model
 
-def execute(model):
-	global currmode
+def execute():
+	global currmode, model
 
 	# Load model again
 	if os.path.exists(args.model_dir + 'model.pt'):
@@ -230,50 +212,29 @@ def execute(model):
 	model = model.to(args.device)
 	model.eval()
 
-	test_data = ImitationDataset(is_test=True)
-
-	# Initialize individual sliding windows for pose and laser
-	pose_window = deque()
-	laser_window = deque()
-
 	# Keep executing until goal is reached
 	while True:
-		# Preprocess/Update input
-		if len(pose_window) == 0:
-			for i in range(args.window_length):
-				pose_window.append([pos.pose.pose.position.x, 
-										pos.pose.pose.position.y,
-										pos.pose.pose.orientation.z, 
-										pos.pose.pose.orientation.w])
-				laser_window.append([laser.ranges])
-		else:
-			pose_window.append([pos.pose.pose.position.x, 
-									pos.pose.pose.position.y,
-									pos.pose.pose.orientation.z, 
-									pos.pose.pose.orientation.w])
-			laser_window.append([laser.ranges])
-			pose_window.popleft()
-			laser_window.popleft()
-
 		# Run network policy to get control command 
-		odom_input = np.array([pose_window])
-		laser_scan = np.array([laser_window])
-		vel, model = model_il.test(model, test_data, odom_input, laser_scan)
-		mutex.acquire()
+		odom_input = np.array([[pos.pose.pose.position.x, 
+								pos.pose.pose.position.y,
+								pos.pose.pose.position.z,
+								pos.pose.pose.orientation.x, 
+								pos.pose.pose.orientation.y, 
+								pos.pose.pose.orientation.z, 
+								pos.pose.pose.orientation.w]])
+		laser_scan = np.array([laser.ranges])
+
+		vel = model_il.test(model, odom_input, laser_scan)
+		robot_cmd = Twist()
 		robot_cmd.linear.x = vel[0,0]
 		robot_cmd.angular.z = vel[0,1]
-		print(vel)
 		pub_cmd.publish(robot_cmd)
-		mutex.release()
 
-		if abs(pos.pose.pose.position.x - 6.0) < 0.2 and \
-				abs(pos.pose.pose.position.y + 1.0) < 0.2:
+		if abs(pos.pose.pose.position.x - 6.0) < 1.0 and \
+				abs(pos.pose.pose.position.y + 1.0) < 0.3:
 			# Stop the robot
-			mutex.acquire()
 			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
 			pub_cmd.publish(robot_cmd)
-			mutex.release()
-			rospy.sleep(0.5)
 			# Reset robot to start state
 			print("Goal is reached. Resetting robot to start")
 			resetRobotState()
@@ -285,62 +246,22 @@ def execute(model):
 		# Sleep for the remaining time
 		rate.sleep()
 
-
 	#done training, return to idle
 	currmode=IDLE
 
 def clearDataset():
 	# Initialize Dataset D
 	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
-	# Define sliding window to be deque
-	slide_window_D = deque()
-	return D, slide_window_D
-
-
-def learner(args):
-	# add callbacks
-	rospy.Subscriber("cmd_vel", Twist, cmdCallback)
-	rospy.Subscriber("scan", LaserScan, laserCallback)
-	rospy.Subscriber("odom", Odometry, odomCallback)
-	rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amclCallback)
-	rospy.Subscriber("/camera/rgb/image_raw", Image, cameraCallback)
-	rospy.Subscriber("learner_feedback", String, expertCallback)
-	rospy.Subscriber("/cmd_vel_temp", Twist, expertCmdCallback)
-	rospy.sleep(0.1)	# Wait a short while for subscribers to be ready
-
-	# service handler
-	modeservice = rospy.Service('mode_change', Mode, handleModeChange)
-
-	# Initialize model
-	model = ImitationNet(control_dim=2, device=args.device)
-
-	# Initialize dataset and sliding window for data recording
-	D, slide_window_D = clearDataset()
-
-	# main loop
-	while not rospy.is_shutdown():
-		if currmode == COLLECT:
-			D, slide_window_D= collect(D, slide_window_D)
-		elif currmode == TRAIN:
-			model = train(model)
-		elif currmode == EXECUTE:
-			execute(model)
-		else:
-			# write data to json file and reset D
-			if len(D['robot_pos']) > 0:
-				recordData2File(D)
-			D, slide_window_D = clearDataset()
-
-		# sleep for the remaining time
-		rate.sleep()
+	return D
 
 
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description="parse args")
-	parser.add_argument('--window_length', type=int, default=5)
 	parser.add_argument('--model_dir', type=str, 
-						default='/home/jeffrey/catkin_ws/src/cs6244/models/')
+						default=os.path.expanduser('~')+'/catkin_ws/src/cs6244/models/supervised/')
+	parser.add_argument('--data_dir', type=str, 
+						default=os.path.expanduser('~')+'/catkin_ws/src/cs6244/data/supervised/')
 	parser.add_argument('--device', type=str, default='cpu')
 	args = parser.parse_args()
 
@@ -354,18 +275,48 @@ if __name__=='__main__':
 
 	rospy.init_node('learner', anonymous=True)
 
+	# service handler
+	modeservice = rospy.Service('mode_change', Mode, handleModeChange)
+
+	# add callbacks
+	rospy.Subscriber("scan", LaserScan, laserCallback)
+	rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amclCallback)
+	rospy.Subscriber("/cmd_vel_temp", Twist, expertCmdCallback)
+
 	# add ROS publishers
 	pub_reset = rospy.Publisher("reset_robot_pos", Bool, queue_size=10)
 	pub_cmd = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
-	pub_expert = rospy.Publisher('learner_mode', String, queue_size=10)
 
-	# Initialize cmd vel Twist
-	robot_cmd = Twist()
-
-	# Initialize python mutex
-	mutex = Lock()
+	# Initialize move_base SimpleActionClient
+	client = actionlib.SimpleActionClient('move_base',MoveBaseAction)
+	client.wait_for_server()
 
 	# Initialize rate for controlling robot and updating observations
-	rate = rospy.Rate(10) #Hz
+	rate = rospy.Rate(20) #Hz
 
-	learner(args)
+	# Initialize model
+	model = ImitationNet(control_dim=2, device=args.device)
+
+	# Initialize dataset and sliding window for data recording
+	D = clearDataset()
+
+	# main loop
+	while not rospy.is_shutdown():
+		if currmode == COLLECT:
+			D = collect(D)
+		elif currmode == TRAIN:
+			train()
+		elif currmode == EXECUTE:
+			execute()
+		else:
+			# write data to json file and reset D
+			if len(D['robot_pos']) > 0:
+				recordData2File(D)
+				D = clearDataset()
+				print('Going back to collect')
+				expert_cmd = None
+				currmode = COLLECT
+			D = clearDataset()
+
+		# sleep for the remaining time
+		rate.sleep()
