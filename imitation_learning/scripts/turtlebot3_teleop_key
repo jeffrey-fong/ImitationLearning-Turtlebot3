@@ -36,7 +36,7 @@ else:
   import tty, termios
 
 
-from cs6244.srv import Mode, ModeResponse
+from imitation_learning.srv import Mode, ModeResponse
 
 BURGER_MAX_LIN_VEL = 0.5
 BURGER_MAX_ANG_VEL = 2.84

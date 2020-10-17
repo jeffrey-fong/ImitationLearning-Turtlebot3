@@ -103,7 +103,7 @@ def test(model, odom_input, laser_scan):
 
 
 # Organizing all network hyperparameters into a parser upon initalization
-os.chdir(RosPack().get_path('cs6244'))
+os.chdir(RosPack().get_path('imitation_learning'))
 parser = argparse.ArgumentParser(description="network hyperparameters")
 parser.add_argument('--epochs', type=int, default=50)
 parser.add_argument('--lr', type=float, default=0.002)

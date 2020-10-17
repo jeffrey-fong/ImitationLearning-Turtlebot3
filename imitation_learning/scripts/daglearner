@@ -14,7 +14,7 @@ from geometry_msgs.msg import Twist, Pose, PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool
-from cs6244.srv import Mode, ModeResponse
+from imitation_learning.srv import Mode, ModeResponse
 
 import numpy as np
 import json
@@ -286,7 +286,7 @@ class Dagger():
 
 
 if __name__=='__main__':
-	os.chdir(RosPack().get_path('cs6244'))
+	os.chdir(RosPack().get_path('imitation_learning'))
 	parser = argparse.ArgumentParser(description="parse args")
 	parser.add_argument('--beta', type=float, default=1.0)
 	parser.add_argument('--beta_decay', type=float, default=0.1)

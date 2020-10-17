@@ -105,7 +105,7 @@ def execute():
 
 
 if __name__=='__main__':
-	os.chdir(RosPack().get_path('cs6244'))
+	os.chdir(RosPack().get_path('imitation_learning'))
 	parser = argparse.ArgumentParser(description="parse args")
 	parser.add_argument('--model_dir', type=str, 
 						default=os.getcwd() + '/models/')

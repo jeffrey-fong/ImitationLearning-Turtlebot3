@@ -23,7 +23,7 @@ class ImitationDataset(Dataset):
         self.velocities = None
         self.device = device
 
-        os.chdir(RosPack().get_path('cs6244'))
+        os.chdir(RosPack().get_path('imitation_learning'))
         file_path = os.getcwd() + '/data/' + mode + '/'
 
         # Iterate through all data files
