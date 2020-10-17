@@ -73,6 +73,8 @@ if __name__=='__main__':
 	sub_reset = rospy.Subscriber('reset_robot_pos', Bool, resetRobotPositionCallback)
 	rospy.sleep(0.8)
 	resetRobotPosition()
+	rospy.sleep(0.1)
+	resetRobotPosition()
 
 	rospy.spin()
 

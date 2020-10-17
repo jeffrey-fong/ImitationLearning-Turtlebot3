@@ -82,7 +82,6 @@ def train(model, mode='dagger'):
     print(args.lr)
     opt = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.lr_decay)
     losses = []
-    criterion = nn.MSELoss()
     model.train()
 
     # Iterate through epochs
@@ -97,20 +96,14 @@ def train(model, mode='dagger'):
             opt.zero_grad()
             loss = model.step(odom_input=pose, laser_scan=scan, 
                                     target_control=vel)
-            #predict = model(pose, scan)
-
-            #loss1 = criterion(predict[:,0], vel[:,0])
-            #loss2 = criterion(predict[:,1], vel[:,1])
-            #loss = loss1+loss2
             loss.backward()
             opt.step()
-            print(epoch, loss.item())
+            losses.append(loss.item())
 
         # Print the current status
-        #print("-" * 25)
-        #print("Epoch:{:10}".format(epoch))
-        #print("Train Loss:{:10.6}\t".format(np.mean(losses)))
-        #print("Val Loss:  {:10.6f}".format(loss_val.item()))
+        print("-" * 25)
+        print("Epoch:{:10}".format(epoch))
+        print("Train Loss:{:10.6}\t".format(np.mean(losses)))
 
     # Save and update the model after every full training round
     model.save(args.save_dir + "model" + ".pt")
