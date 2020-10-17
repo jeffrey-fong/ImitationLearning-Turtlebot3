@@ -7,9 +7,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import copy
-import matplotlib.pyplot as plt
 import os
 import json
+from rospkg import RosPack
 
 
 
@@ -23,8 +23,8 @@ class ImitationDataset(Dataset):
         self.velocities = None
         self.device = device
 
-        file_path = os.path.expanduser('~')+"/catkin_ws/src/cs6244/data/" + \
-                            mode + '/'
+        os.chdir(RosPack().get_path('cs6244'))
+        file_path = os.getcwd() + '/data/' + mode + '/'
 
         # Iterate through all data files
         i = 0
@@ -51,7 +51,6 @@ class ImitationDataset(Dataset):
                 self.scans = np.concatenate((self.scans, traj_scan), axis=0)
                 self.velocities = np.concatenate((self.velocities, traj_vel), 
                                                     axis=0)
-
             i += 1
 
         try:
@@ -63,16 +62,6 @@ class ImitationDataset(Dataset):
         print('dataset done', self.poses.shape[0])
 
         if not is_test:
-            # Normalize data
-            # (House dimension: x{-7.5 to 7.5}, y{-5 to 5})
-            # Max Linear Vel: 0.5   Max Angular Vel: 2.84
-            #self.poses[:,0] = (self.poses[:,0]+7.5) / (7.5+7.5)
-            #self.poses[:,1] = (self.poses[:,1]+5) / (5+5)
-            #self.scans = self.scans / 3.5
-            '''self.velocities[:,0] = self.velocities[:,0] / np.max(np.abs(self.velocities[:,0]))
-            self.velocities[:,1] = (self.velocities[:,1] + np.abs(np.min(self.velocities[:,1])))
-            self.velocities[:,1] = self.velocities[:,1] / np.max(self.velocities[:,1])'''
-
             # Separate into train or test set (80%-20%)
             if is_val:
                 start, end = -int(self.poses.shape[0]*0.2), -1
@@ -80,9 +69,6 @@ class ImitationDataset(Dataset):
                 start, end = 0, -int(self.poses.shape[0]*0.2)
 
             # Convert numpy to tensors
-            #self.poses = torch.tensor(self.poses[start:end]).detach().to(self.device).type(torch.float32)
-            #self.scans = torch.tensor(self.scans[start:end]).detach().to(self.device).type(torch.float32)
-            #self.velocities = torch.tensor(self.velocities[start:end]).detach().to(self.device).type(torch.float32)
             self.poses = torch.tensor(self.poses).detach().to(self.device).type(torch.float32)
             self.scans = torch.tensor(self.scans).detach().to(self.device).type(torch.float32)
             self.velocities = torch.tensor(self.velocities).detach().to(self.device).type(torch.float32)
