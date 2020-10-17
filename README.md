@@ -26,7 +26,7 @@ rosrun imitation_learning reset_robot_pos
 ```
 * Launch the ROS Navigation Stack to initialize the expert
 ```
-roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=$HOME/catkin_ws/src/imitationlearning_turtlebot3/imitation_learning/house_map.yaml
+roslaunch turtlebot3_navigation turtlebot3_navigation.launch map_file:=$HOME/catkin_ws/src/ImitationLearning_Turtlebot3/imitation_learning/house_map.yaml
 ```
 * Run either DAgger (`daglearner` node) or supervised learning (`learner` node) algorithms in a terminal with the virtual environment
 ```
