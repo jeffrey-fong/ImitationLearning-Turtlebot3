@@ -8,6 +8,7 @@
 
 import rospy
 from geometry_msgs.msg import Twist, PoseWithCovarianceStamped
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool
 
@@ -16,6 +17,7 @@ import json
 
 import argparse
 import os
+from rospkg import RosPack
 import random
 
 from model_il import ImitationNet
@@ -27,6 +29,7 @@ import torch
 expert_cmd = None
 laser = None 
 pos = None
+true_pos = None
 
 
 
@@ -42,6 +45,10 @@ def laserCallback(scan):
 def amclCallback(amcl):
 	global pos
 	pos = amcl
+
+def odomCallback(odom):
+	global true_pos
+	true_pos = odom
 
 def resetRobotState():
 	pub_reset.publish(True)
@@ -98,24 +105,24 @@ def execute():
 
 
 if __name__=='__main__':
+	os.chdir(RosPack().get_path('cs6244'))
 	parser = argparse.ArgumentParser(description="parse args")
 	parser.add_argument('--model_dir', type=str, 
-						default=os.path.expanduser('~')+'/catkin_ws/src/cs6244/models/')
+						default=os.getcwd() + '/models/')
 	parser.add_argument('--device', type=str, default='cpu')
 	args = parser.parse_args()
 
 	# configure cuda
 	if torch.cuda.is_available():
-	    print('cuda is available')
 	    args.device = torch.device('cuda')
 	else:
-	    print('cuda is not available')
 	    args.device = "cpu"
 
 	rospy.init_node('policyexec', anonymous=True)
 
 	# add ROS subscribers and publishers
 	rospy.Subscriber("scan", LaserScan, laserCallback)
+	rospy.Subscriber("odom", Odometry, odomCallback)
 	rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amclCallback)
 	rospy.Subscriber("/cmd_vel_temp", Twist, expertCmdCallback)
 	pub_reset = rospy.Publisher("reset_robot_pos", Bool, queue_size=10)
