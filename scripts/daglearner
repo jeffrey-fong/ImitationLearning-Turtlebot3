@@ -141,8 +141,8 @@ class Dagger():
 
 	def collect(self):
 		# Load model again
-		if os.path.exists(args.model_dir + 'model.pt'):
-			self.model.load(args.model_dir + 'model.pt')
+		if os.path.exists(self.model_dir + 'model.pt'):
+			self.model.load(self.model_dir + 'model.pt')
 		self.model = self.model.to(self.device)
 		self.model.eval()
 
@@ -223,9 +223,9 @@ class Dagger():
 
 	def train(self):
 		# Load model again
-		if os.path.exists(args.model_dir + 'model.pt'):
-			self.model.load(args.model_dir + 'model.pt')
-		self.model = self.model.to(args.device)
+		if os.path.exists(self.model_dir + 'model.pt'):
+			self.model.load(self.model_dir + 'model.pt')
+		self.model = self.model.to(self.device)
 
 		# train neural network
 		self.model = model_il.train(self.model, mode='dagger')
@@ -241,8 +241,8 @@ class Dagger():
 
 	def execute(self):
 		# Load model again
-		if os.path.exists(args.model_dir + 'model.pt'):
-			self.model.load(args.model_dir + 'model.pt')
+		if os.path.exists(self.model_dir + 'model.pt'):
+			self.model.load(self.model_dir + 'model.pt')
 		self.model = self.model.to(self.device)
 		self.model.eval()
 

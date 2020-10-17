@@ -47,8 +47,6 @@ class Dagger():
 		self.true_pos = None
 		self.currmode = None
 		self.num_traj = 0
-		self.beta = args.beta
-		self.beta_decay = args.beta_decay
 		self.device = args.device
 		self.model_dir = args.model_dir
 		self.data_dir = args.data_dir
@@ -133,9 +131,9 @@ class Dagger():
 			self.num_traj += 1
 
 	def resetRobotState(self):
-		pub_reset.publish(True)
+		self.pub_reset.publish(True)
 		rospy.sleep(0.1)
-		pub_reset.publish(True)		# Repeat to make sure reset at the right pose
+		self.pub_reset.publish(True)		# Repeat to make sure reset at the right pose
 
 	def clearDataset(self):
 		# Initialize/Reset Dataset D
@@ -148,199 +146,161 @@ class Dagger():
 		noise = 0.0
 
 		# Start the expert planning first and let it run in the background
-		client.send_goal(goal)
+		self.client.send_goal(self.goal)
 		print('starting expert planning')
 
 		# Control robot until robot reached goal state
 		while True:
-			if expert_cmd is not None:
+			if self.expert_cmd is not None:
 			# Check if goal is reached
-				if (abs(pos.pose.pose.position.x - 6.0) < 0.5 and \
-					abs(pos.pose.pose.position.y + 1.0) < 0.1) or \
-					(expert_cmd.linear.x == 0.0 and expert_cmd.angular.z == 0.0):
-					print('test', pos.pose.pose.position.x)
+				if (abs(self.true_pos.pose.pose.position.x - 6.0) < 0.5 and \
+					abs(self.true_pos.pose.pose.position.y + 1.0) < 0.1):
 					# Stop the robot
-					robot_cmd = Twist()
-					robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
-					pub_cmd.publish(robot_cmd)
+					self.robot_cmd.linear.x, self.robot_cmd.angular.z = 0.0, 0.0
+					self.pub_cmd.publish(self.robot_cmd)
 					# Stop the expert policy path planning
 					print('Stopping expert planning.')
-					client.cancel_goal()
+					self.client.cancel_goal()
 					# Reset robot to start state
 					print("Demonstration complete. Resetting robot to start")
-					resetRobotState()
+					self.resetRobotState()
 					# Change mode back to IDLE
 					print('Collection done.')
-					currmode = IDLE
+					self.currmode = IDLE
 					break
 
 			
 				# Always use expert policy
-				print('expert {:10.6f}, {:10.6f}'.format(expert_cmd.linear.x, expert_cmd.angular.z))
-				robot_cmd.linear.x = expert_cmd.linear.x
+				print('expert {:10.6f}, {:10.6f}'.format(self.expert_cmd.linear.x, self.expert_cmd.angular.z))
+				self.robot_cmd.linear.x = self.expert_cmd.linear.x
 				if noise_count % 100 == 0:
 					if np.random.randint(2):
 						noise = np.random.uniform(low=0.1, high=0.2)
 					else:
 						noise = np.random.uniform(low=-0.2, high=-0.1)
-				robot_cmd.angular.z = expert_cmd.angular.z + noise
-				pub_cmd.publish(robot_cmd)
+				self.robot_cmd.angular.z = self.expert_cmd.angular.z + noise
+				self.pub_cmd.publish(self.robot_cmd)
 
 				# Update D
-				robot_pos = [pos.pose.pose.position.x, pos.pose.pose.position.y,
-							pos.pose.pose.position.z, pos.pose.pose.orientation.x,
-							pos.pose.pose.orientation.y, pos.pose.pose.orientation.z, 
-							pos.pose.pose.orientation.w]
-				robot_vel = [expert_cmd.linear.x, expert_cmd.angular.z]
+				robot_pos = [self.pos.pose.pose.position.x, self.pos.pose.pose.position.y,
+							self.pos.pose.pose.position.z, self.pos.pose.pose.orientation.x,
+							self.pos.pose.pose.orientation.y, self.pos.pose.pose.orientation.z, 
+							self.pos.pose.pose.orientation.w]
+				robot_vel = [self.expert_cmd.linear.x, self.expert_cmd.angular.z]
 
-				D["robot_pos"] += [robot_pos]
-				D["laser_scan"] += [laser.ranges]
-				D["robot_vel"] += [robot_vel]
+				self.D["robot_pos"] += [robot_pos]
+				self.D["laser_scan"] += [self.laser.ranges]
+				self.D["robot_vel"] += [robot_vel]
 
 				noise_count += 1
 
 			# Sleep for the remaining time
 			rate.sleep()
 
-		return D
 
+	def train(self):
+		# Load model again
+		if os.path.exists(self.model_dir + 'model.pt'):
+			self.model.load(self.model_dir + 'model.pt')
+		self.model = self.model.to(self.device)
 
-def train():
-	global currmode, model
+		# train neural network
+		self.model = model_il.train(self.model, mode='supervised')
+		self.model.eval()
 
-	# Load model again
-	if os.path.exists(args.model_dir + 'model.pt'):
-		model.load(args.model_dir + 'model.pt')
-	model = model.to(args.device)
+		# Reset robot to start state
+		print("Training round complete. Resetting robot to start")
+		self.resetRobotState()
 
-	# train neural network
-	model = model_il.train(model, mode='supervised')
-	model.eval()
+		# Done training, return to idle
+		print("Returning to Idle mode.")
+		self.currmode=IDLE
 
-	# Reset robot to start state
-	print("Training round complete. Resetting robot to start")
-	resetRobotState()
+	def execute(self):
+		# Load model again
+		if os.path.exists(self.model_dir + 'model.pt'):
+			self.model.load(self.model_dir + 'model.pt')
+		self.model = self.model.to(self.device)
+		self.model.eval()
 
-	# Done training, return to idle
-	print("Returning to Idle mode.")
-	currmode=IDLE
+		# Keep executing until goal is reached
+		while True:
+			# Run network policy to get control command 
+			odom_input = np.array([[self.pos.pose.pose.position.x, 
+									self.pos.pose.pose.position.y,
+									self.pos.pose.pose.position.z,
+									self.pos.pose.pose.orientation.x, 
+									self.pos.pose.pose.orientation.y, 
+									self.pos.pose.pose.orientation.z, 
+									self.pos.pose.pose.orientation.w]])
+			laser_scan = np.array([self.laser.ranges])
 
-	return model
+			vel = model_il.test(self.model, odom_input, laser_scan)
+			self.robot_cmd.linear.x = vel[0,0]
+			self.robot_cmd.angular.z = vel[0,1]
+			self.pub_cmd.publish(self.robot_cmd)
 
-def execute():
-	global currmode, model
+			if abs(self.true_pos.pose.pose.position.x - 6.0) < 1.0 and \
+					abs(self.true_pos.pose.pose.position.y + 1.0) < 0.3:
+				# Stop the robot
+				self.robot_cmd.linear.x, self.robot_cmd.angular.z = 0.0, 0.0
+				self.pub_cmd.publish(self.robot_cmd)
+				# Reset robot to start state
+				print("Goal is reached. Resetting robot to start")
+				self.resetRobotState()
+				# Change mode back to IDLE
+				print('Testing round successful. Going back to IDLE mode.')
+				self.currmode = IDLE
+				break
 
-	# Load model again
-	if os.path.exists(args.model_dir + 'model.pt'):
-		model.load(args.model_dir + 'model.pt')
-	model = model.to(args.device)
-	model.eval()
+			# Sleep for the remaining time
+			rate.sleep()
 
-	# Keep executing until goal is reached
-	while True:
-		# Run network policy to get control command 
-		odom_input = np.array([[pos.pose.pose.position.x, 
-								pos.pose.pose.position.y,
-								pos.pose.pose.position.z,
-								pos.pose.pose.orientation.x, 
-								pos.pose.pose.orientation.y, 
-								pos.pose.pose.orientation.z, 
-								pos.pose.pose.orientation.w]])
-		laser_scan = np.array([laser.ranges])
-
-		vel = model_il.test(model, odom_input, laser_scan)
-		robot_cmd = Twist()
-		robot_cmd.linear.x = vel[0,0]
-		robot_cmd.angular.z = vel[0,1]
-		pub_cmd.publish(robot_cmd)
-
-		if abs(pos.pose.pose.position.x - 6.0) < 1.0 and \
-				abs(pos.pose.pose.position.y + 1.0) < 0.3:
-			# Stop the robot
-			robot_cmd.linear.x, robot_cmd.angular.z = 0.0, 0.0
-			pub_cmd.publish(robot_cmd)
-			# Reset robot to start state
-			print("Goal is reached. Resetting robot to start")
-			resetRobotState()
-			# Change mode back to IDLE
-			print('Testing round successful. Going back to IDLE mode.')
-			currmode = IDLE
-			break
-
-		# Sleep for the remaining time
-		rate.sleep()
-
-	#done training, return to idle
-	currmode=IDLE
-
-def clearDataset():
-	# Initialize Dataset D
-	D = {'robot_pos': [], 'laser_scan': [], 'robot_vel':[]}
-	return D
+		#done training, return to idle
+		self.currmode=IDLE
 
 
 
 if __name__=='__main__':
+	os.chdir(RosPack().get_path('cs6244'))
 	parser = argparse.ArgumentParser(description="parse args")
 	parser.add_argument('--model_dir', type=str, 
-						default=os.path.expanduser('~')+'/catkin_ws/src/cs6244/models/supervised/')
+						default=os.getcwd() + '/models/supervised/')
 	parser.add_argument('--data_dir', type=str, 
-						default=os.path.expanduser('~')+'/catkin_ws/src/cs6244/data/supervised/')
+						default=os.getcwd() + '/data/supervised/')
 	parser.add_argument('--device', type=str, default='cpu')
 	args = parser.parse_args()
 
 	# configure cuda
 	if torch.cuda.is_available():
-	    print('cuda is available')
 	    args.device = torch.device('cuda')
 	else:
-	    print('cuda is not available')
 	    args.device = "cpu"
 
 	rospy.init_node('learner', anonymous=True)
 
-	# service handler
-	modeservice = rospy.Service('mode_change', Mode, handleModeChange)
-
-	# add callbacks
-	rospy.Subscriber("scan", LaserScan, laserCallback)
-	rospy.Subscriber("amcl_pose", PoseWithCovarianceStamped, amclCallback)
-	rospy.Subscriber("/cmd_vel_temp", Twist, expertCmdCallback)
-
-	# add ROS publishers
-	pub_reset = rospy.Publisher("reset_robot_pos", Bool, queue_size=10)
-	pub_cmd = rospy.Publisher("/cmd_vel", Twist, queue_size=10)
-
-	# Initialize move_base SimpleActionClient
-	client = actionlib.SimpleActionClient('move_base',MoveBaseAction)
-	client.wait_for_server()
+	dagger = Dagger(args)
 
 	# Initialize rate for controlling robot and updating observations
 	rate = rospy.Rate(20) #Hz
 
-	# Initialize model
-	model = ImitationNet(control_dim=2, device=args.device)
-
-	# Initialize dataset and sliding window for data recording
-	D = clearDataset()
-
 	# main loop
 	while not rospy.is_shutdown():
-		if currmode == COLLECT:
-			D = collect(D)
-		elif currmode == TRAIN:
-			train()
-		elif currmode == EXECUTE:
-			execute()
+		if dagger.currmode == COLLECT:
+			dagger.collect()
+		elif dagger.currmode == TRAIN:
+			dagger.train()
+		elif dagger.currmode == EXECUTE:
+			dagger.execute()
 		else:
 			# write data to json file and reset D
-			if len(D['robot_pos']) > 0:
-				recordData2File(D)
-				D = clearDataset()
+			if len(dagger.D['robot_pos']) > 0:
+				dagger.recordData2File()
+				dagger.clearDataset()
 				print('Going back to collect')
-				expert_cmd = None
-				currmode = COLLECT
-			D = clearDataset()
+				dagger.expert_cmd = None
+				dagger.currmode = COLLECT
+			dagger.clearDataset()
 
 		# sleep for the remaining time
 		rate.sleep()
